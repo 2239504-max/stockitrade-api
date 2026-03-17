@@ -1,1 +1,2 @@
-
+def place_order(...) -> dict:
+    ...
