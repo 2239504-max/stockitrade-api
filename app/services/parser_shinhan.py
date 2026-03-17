@@ -148,3 +148,4 @@ def parse_shinhan_xlsx(path: Path) -> tuple[list[dict[str, Any]], list[dict[str,
             errors.append({"row": row_number, "error": str(exc)})
 
     return parsed, errors
+    

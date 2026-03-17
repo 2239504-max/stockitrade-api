@@ -1,8 +1,20 @@
 from fastapi import FastAPI
 from app.routers import domestic_stocks, overseas_stocks, domestic_derivatives, overseas_derivatives
-from app.routers import portfolio
+from app.routers import portfolio, market
 
-app = FastAPI(title="KIS Multi-Asset API")
+app = FastAPI(
+    title="StockiTrade API",
+    description="Portfolio tracking and market data API powered by KIS",
+    version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health")
 def health():
