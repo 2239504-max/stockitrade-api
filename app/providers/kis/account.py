@@ -1,1 +1,2 @@
-
+def get_balance() -> dict:
+    ...
