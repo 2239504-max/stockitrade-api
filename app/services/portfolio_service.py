@@ -1,1 +1,143 @@
+import hashlib
+import uuid
+from pathlib import Path
 
+from app.core.config import settings
+from app.providers.kis.market import get_quote
+from app.services.parser_shinhan import parse_shinhan_xlsx
+from app.services.trade_store import (
+    init_db,
+    insert_trade,
+    list_trades,
+)
+
+init_db()
+
+
+def _save_upload_file(filename: str, file_bytes: bytes) -> Path:
+    upload_dir = Path(settings.upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_path = upload_dir / f"{uuid.uuid4()}_{Path(filename).name}"
+    saved_path.write_bytes(file_bytes)
+    return saved_path
+
+
+def _hash_bytes(file_bytes: bytes) -> str:
+    return hashlib.sha256(file_bytes).hexdigest()
+
+
+def ingest_shinhan_file(filename: str, file_bytes: bytes) -> dict:
+    if not filename.endswith(".xlsx"):
+        raise ValueError("Only .xlsx files are allowed")
+
+    saved_path = _save_upload_file(filename, file_bytes)
+    parsed_trades, errors = parse_shinhan_xlsx(saved_path)
+
+    created_ids = []
+    for trade in parsed_trades:
+        created_ids.append(insert_trade(trade))
+
+    return {
+        "message": "shinhan upload processed",
+        "filename": filename,
+        "saved_path": str(saved_path),
+        "file_hash": _hash_bytes(file_bytes),
+        "inserted_count": len(created_ids),
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
+def create_manual_trade(payload: dict) -> dict:
+    trade_id = insert_trade(payload)
+    return {
+        "message": "manual trade created",
+        "trade_id": trade_id,
+        "trade": payload,
+    }
+
+
+def build_portfolio_summary() -> dict:
+    trades = list_trades()
+
+    lots: dict[str, dict] = {}
+    realized_pnl = 0.0
+    cash = 0.0
+
+    for trade in trades:
+        ticker = trade["ticker"]
+        side = str(trade["side"]).lower()
+        qty = float(trade["quantity"])
+        price = float(trade["price"])
+        fee = float(trade["fee"] or 0)
+
+        if ticker not in lots:
+            lots[ticker] = {
+                "quantity": 0.0,
+                "cost_basis": 0.0,
+                "market": trade.get("market"),
+                "currency": trade.get("currency"),
+            }
+
+        bucket = lots[ticker]
+
+        if side == "buy":
+            bucket["cost_basis"] += qty * price + fee
+            bucket["quantity"] += qty
+            cash -= qty * price + fee
+
+        elif side == "sell":
+            if bucket["quantity"] <= 0:
+                avg_cost = 0.0
+            else:
+                avg_cost = bucket["cost_basis"] / bucket["quantity"]
+
+            realized_pnl += (price - avg_cost) * qty - fee
+            bucket["quantity"] -= qty
+            bucket["cost_basis"] -= avg_cost * qty
+            cash += qty * price - fee
+
+    positions = []
+    market_value = 0.0
+    unrealized_pnl = 0.0
+
+    for ticker, bucket in lots.items():
+        qty = bucket["quantity"]
+        if abs(qty) <= 0:
+            continue
+
+        avg_cost = bucket["cost_basis"] / qty if qty else 0.0
+        market = bucket.get("market") or "US"
+
+        quote = get_quote(ticker, market=market)
+        current_price = float(quote["price"])
+
+        position_market_value = qty * current_price
+        position_unrealized = (current_price - avg_cost) * qty
+
+        positions.append({
+            "ticker": ticker,
+            "quantity": round(qty, 6),
+            "avg_cost": round(avg_cost, 4),
+            "current_price": round(current_price, 4),
+            "market_value": round(position_market_value, 2),
+            "unrealized_pnl": round(position_unrealized, 2),
+            "realized_pnl": 0.0,
+            "market": market,
+            "currency": bucket.get("currency") or quote.get("currency"),
+        })
+
+        market_value += position_market_value
+        unrealized_pnl += position_unrealized
+
+    return {
+        "total_trades": len(trades),
+        "total_positions": len(positions),
+        "cash": round(cash, 2),
+        "market_value": round(market_value, 2),
+        "total_value": round(cash + market_value, 2),
+        "realized_pnl": round(realized_pnl, 2),
+        "unrealized_pnl": round(unrealized_pnl, 2),
+        "positions": positions,
+    }
