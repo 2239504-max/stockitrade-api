@@ -1,1 +1,2 @@
-
+def get_current_price(symbol: str, market: str) -> dict:
+    ...
