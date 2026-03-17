@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from app.routers import domestic_stocks, overseas_stocks, domestic_derivatives, overseas_derivatives
 from app.routers import portfolio
 
-app = FastAPI(title="KIS Multi-Asset API")
+app = FastAPI(title="StockiTrade API")
 
 @app.get("/health")
 def health():
