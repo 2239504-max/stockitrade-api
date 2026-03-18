@@ -15,9 +15,31 @@ TRADE_NAME_MAP = {
 }
 
 
-def map_shinhan_row_to_event(row_number: int, row: dict[str, Any]) -> NormalizedEvent:
-    raw_trade_name = str(row.get("trade_name") or "").strip()
-    event_type = TRADE_NAME_MAP.get(raw_trade_name, "UNKNOWN")
+def classify_trade_name(raw_trade_name: str) -> str:
+    name = raw_trade_name.strip()
+
+    exact_map = {
+        "이체입금": "CASH_IN",
+        "대체입금": "CASH_IN",
+        "외화매수": "FX_BUY",
+        "외화매도": "FX_SELL",
+        "매수": "BUY",
+        "매도": "SELL",
+    }
+    if name in exact_map:
+        return exact_map[name]
+
+    if "주식매수" in name:
+        return "BUY"
+    if "주식매도" in name:
+        return "SELL"
+    if "배당" in name:
+        return "DIVIDEND"
+    if "세금" in name:
+        return "TAX"
+
+    return "UNKNOWN"
+    event_type = classify_trade_name(raw_trade_name)
 
     date = str(row.get("date") or "").strip()
     ticker = _none_if_blank(row.get("ticker"))
