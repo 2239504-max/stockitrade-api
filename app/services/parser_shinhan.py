@@ -3,20 +3,53 @@ from typing import Any
 from xml.etree import ElementTree as ET
 import zipfile
 
+from app.services.shinhan_event_mapper import map_shinhan_row_to_event
+from app.schemas.events import NormalizedEvent
+
 HEADER_ALIASES = {
     "date": "date",
+    "일자": "date",
+
     "ticker": "ticker",
     "symbol": "ticker",
+    "종목코드": "ticker",
+    "종목명": "ticker_name",
+
     "side": "side",
+    "구분": "side",
+
+    "trade_name": "trade_name",
+    "거래명": "trade_name",
+    "적요": "trade_name",
+    "내용": "trade_name",
+
     "quantity": "quantity",
     "qty": "quantity",
+    "수량": "quantity",
+
     "price": "price",
+    "단가": "price",
+
+    "amount": "amount",
+    "금액": "amount",
+
     "fee": "fee",
+    "수수료": "fee",
+
+    "tax": "tax",
+    "세금": "tax",
+
+    "currency": "currency",
+    "통화": "currency",
+
     "account": "account",
+    "계좌": "account",
+
     "memo": "memo",
+    "메모": "memo",
 }
 
-REQUIRED_COLUMNS = {"date", "ticker", "side", "quantity", "price"}
+REQUIRED_COLUMNS = {"date", "trade_name"}
 NS = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 
@@ -113,39 +146,27 @@ def parse_shinhan_xlsx(path: Path) -> tuple[list[dict[str, Any]], list[dict[str,
     for row_number, row in enumerate(rows[1:], start=2):
         if all(cell in (None, "") for cell in row):
             continue
-
         try:
-            trade = {
-                "date": str(row[header_index["date"]]).strip(),
-                "ticker": str(row[header_index["ticker"]]).strip(),
-                "side": str(row[header_index["side"]]).strip().lower(),
-                "quantity": float(row[header_index["quantity"]]),
-                "price": float(row[header_index["price"]]),
-                "fee": (
-                    float(row[header_index["fee"]])
-                    if "fee" in header_index and row[header_index["fee"]] not in (None, "")
-                    else 0.0
-                ),
-                "account": (
-                    str(row[header_index["account"]]).strip()
-                    if "account" in header_index and row[header_index["account"]] not in (None, "")
-                    else None
-                ),
-                "memo": (
-                    str(row[header_index["memo"]]).strip()
-                    if "memo" in header_index and row[header_index["memo"]] not in (None, "")
-                    else None
-                ),
+            normalized_row = {
+                key: row[idx] if idx < len(row) else None
+                for key, idx in header_index.items()
             }
 
-            if trade["side"] not in {"buy", "sell"}:
-                raise ValueError("side must be buy or sell")
-            if trade["quantity"] <= 0 or trade["price"] <= 0:
-                raise ValueError("quantity and price must be positive")
+            event: NormalizedEvent = map_shinhan_row_to_event(
+                row_number=row_number,
+                row=normalized_row,
+            )
 
-            parsed.append(trade)
+            parsed.append(event.model_dump())
+
+            if event.event_type == "UNKNOWN":
+                errors.append({
+                    "row": row_number,
+                    "error": f"unknown trade_name: {event.raw_trade_name}",
+                })
+
         except Exception as exc:  # noqa: BLE001
             errors.append({"row": row_number, "error": str(exc)})
-
+                    
     return parsed, errors
     
