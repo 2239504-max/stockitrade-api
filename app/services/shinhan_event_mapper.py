@@ -42,7 +42,8 @@ def classify_trade_name(raw_trade_name: str) -> str:
     event_type = classify_trade_name(raw_trade_name)
 
     date = str(row.get("date") or "").strip()
-    ticker = _none_if_blank(row.get("ticker"))
+    ticker = None
+    ticker_name = _none_if_blank(row.get("ticker_name"))
     quantity = _to_float_or_none(row.get("quantity"))
     price = _to_float_or_none(row.get("price"))
     fee = _to_float_or_zero(row.get("fee"))
