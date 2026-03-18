@@ -103,24 +103,27 @@ def _read_sheet_rows(path: Path) -> list[list[Any]]:
     return rows
 
 
-def parse_shinhan_xlsx(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def parse_shinhan_xlsx(
+    path: Path,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
     try:
         rows = _read_sheet_rows(path)
     except Exception as exc:  # noqa: BLE001
-        return [], [{"row": 0, "error": f"invalid xlsx: {exc}"}]
+        return [], [{"row": 0, "error": f"invalid xlsx: {exc}"}], {}
 
     if not rows:
-        return [], [{"row": 0, "error": "empty file"}]
+        return [], [{"row": 0, "error": "empty file"}], {}
 
     headers = [_normalize_header(col) for col in rows[0]]
     header_index = {name: idx for idx, name in enumerate(headers) if name}
 
     missing = REQUIRED_COLUMNS - set(header_index.keys())
     if missing:
-        return [], [{"row": 1, "error": f"missing required columns: {', '.join(sorted(missing))}"}]
+        return [], [{"row": 1, "error": f"missing required columns: {', '.join(sorted(missing))}"}], {}
 
     parsed: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+    unknown_trade_names: dict[str, int] = {}
 
     for row_number, row in enumerate(rows[1:], start=2):
         if all(cell in (None, "") for cell in row):
@@ -139,13 +142,18 @@ def parse_shinhan_xlsx(path: Path) -> tuple[list[dict[str, Any]], list[dict[str,
             parsed.append(event.model_dump())
 
             if event.event_type == "UNKNOWN":
-                errors.append({
-                    "row": row_number,
-                    "error": f"unknown trade_name: {event.raw_trade_name}",
-                })
+    trade_name = (event.raw_trade_name or "").strip() or "(blank)"
+    unknown_trade_names[trade_name] = unknown_trade_names.get(trade_name, 0) + 1
 
+    errors.append({
+        "row": row_number,
+        "error": f"unknown trade_name: {trade_name}",
+    })
         except Exception as exc:  # noqa: BLE001
-            errors.append({"row": row_number, "error": str(exc)})
+            errors.append({
+    "row": row_number,
+    "error": f"unknown trade_name: {event.raw_trade_name}",
+})
                     
-    return parsed, errors
+    return parsed, errors, unknown_trade_names
     
