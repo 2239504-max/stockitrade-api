@@ -7,46 +7,25 @@ from app.services.shinhan_event_mapper import map_shinhan_row_to_event
 from app.schemas.events import NormalizedEvent
 
 HEADER_ALIASES = {
-    "date": "date",
-    "일자": "date",
-
-    "ticker": "ticker",
-    "symbol": "ticker",
-    "종목코드": "ticker",
-    "종목명": "ticker_name",
-
-    "side": "side",
-    "구분": "side",
-
-    "trade_name": "trade_name",
+    "거래일자": "date",
     "거래명": "trade_name",
-    "적요": "trade_name",
-    "내용": "trade_name",
-
-    "quantity": "quantity",
-    "qty": "quantity",
-    "수량": "quantity",
-
-    "price": "price",
-    "단가": "price",
-
-    "amount": "amount",
-    "금액": "amount",
-
-    "fee": "fee",
-    "수수료": "fee",
-
-    "tax": "tax",
-    "세금": "tax",
-
-    "currency": "currency",
-    "통화": "currency",
-
-    "account": "account",
-    "계좌": "account",
-
-    "memo": "memo",
-    "메모": "memo",
+    "거래수량": "quantity",
+    "거래금액": "amount",
+    "제세금/대출이자": "tax",
+    "통화코드": "currency",
+    "외화정산금액": "fx_settlement_amount",
+    "거래번호": "trade_no",
+    "종목명": "ticker_name",
+    "거래단가": "price",
+    "정산금액": "settlement_amount",
+    "수수료/fee": "fee",
+    "현금잔액": "cash_balance",
+    "잔고수량/펀드평가금액": "balance_quantity",
+    "상대계좌명": "counterparty_name",
+    "상대계좌번호": "counterparty_account",
+    "외화거래금액": "fx_trade_amount",
+    "외화예수금액": "fx_cash_balance",
+    "처리점": "branch",
 }
 
 REQUIRED_COLUMNS = {"date", "trade_name"}
