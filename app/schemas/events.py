@@ -27,6 +27,7 @@ class NormalizedEvent(BaseModel):
     event_type: EventType
     date: str
     ticker: Optional[str] = None
+    ticker_name: Optional[str] = None
     quantity: Optional[float] = None
     price: Optional[float] = None
     amount: Optional[float] = None
