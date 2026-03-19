@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from app.routers import domestic_stocks, overseas_stocks, domestic_derivatives, overseas_derivatives
 from app.routers import portfolio, market
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
     title="StockiTrade API",
