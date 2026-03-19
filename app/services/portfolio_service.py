@@ -34,16 +34,17 @@ def ingest_shinhan_file(filename: str, file_bytes: bytes) -> dict:
     saved_path = _save_upload_file(filename, file_bytes)
     parsed_events, errors, unknown_trade_names = parse_shinhan_xlsx(saved_path)
 
-return {
-    "message": "shinhan upload parsed",
-    "filename": filename,
-    "saved_path": str(saved_path),
-    "parsed_count": len(parsed_events),
-    "error_count": len(errors),
-    "errors": errors,
-    "unknown_trade_names": unknown_trade_names,
-    "parsed_preview": parsed_events[:20],
-}
+    return {
+        "message": "shinhan upload parsed",
+        "filename": filename,
+        "saved_path": str(saved_path),
+        "file_hash": _hash_bytes(file_bytes),
+        "parsed_count": len(parsed_events),
+        "error_count": len(errors),
+        "errors": errors,
+        "unknown_trade_names": unknown_trade_names,
+        "parsed_preview": parsed_events[:20],
+    }
 
 
 def create_manual_trade(payload: dict) -> dict:

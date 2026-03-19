@@ -3,8 +3,8 @@ from typing import Any
 from xml.etree import ElementTree as ET
 import zipfile
 
-from app.services.shinhan_event_mapper import map_shinhan_row_to_event
 from app.schemas.events import NormalizedEvent
+from app.services.shinhan_event_mapper import map_shinhan_row_to_event
 
 HEADER_ALIASES = {
     "거래일자": "date",
@@ -119,7 +119,10 @@ def parse_shinhan_xlsx(
 
     missing = REQUIRED_COLUMNS - set(header_index.keys())
     if missing:
-        return [], [{"row": 1, "error": f"missing required columns: {', '.join(sorted(missing))}"}], {}
+        return [], [{
+            "row": 1,
+            "error": f"missing required columns: {', '.join(sorted(missing))}",
+        }], {}
 
     parsed: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -128,6 +131,7 @@ def parse_shinhan_xlsx(
     for row_number, row in enumerate(rows[1:], start=2):
         if all(cell in (None, "") for cell in row):
             continue
+
         try:
             normalized_row = {
                 key: row[idx] if idx < len(row) else None
@@ -142,18 +146,20 @@ def parse_shinhan_xlsx(
             parsed.append(event.model_dump())
 
             if event.event_type == "UNKNOWN":
-    trade_name = (event.raw_trade_name or "").strip() or "(blank)"
-    unknown_trade_names[trade_name] = unknown_trade_names.get(trade_name, 0) + 1
+                trade_name = (event.raw_trade_name or "").strip() or "(blank)"
+                unknown_trade_names[trade_name] = (
+                    unknown_trade_names.get(trade_name, 0) + 1
+                )
 
-    errors.append({
-        "row": row_number,
-        "error": f"unknown trade_name: {trade_name}",
-    })
+                errors.append({
+                    "row": row_number,
+                    "error": f"unknown trade_name: {trade_name}",
+                })
+
         except Exception as exc:  # noqa: BLE001
             errors.append({
-    "row": row_number,
-    "error": f"unknown trade_name: {event.raw_trade_name}",
-})
-                    
+                "row": row_number,
+                "error": str(exc),
+            })
+
     return parsed, errors, unknown_trade_names
-    
