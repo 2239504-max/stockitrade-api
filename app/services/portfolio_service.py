@@ -10,6 +10,7 @@ from app.services.trade_store import (
     insert_trade,
     list_trades,
 )
+from app.services.name_mapping_service import resolve_name
 
 init_db()
 
@@ -33,17 +34,27 @@ def ingest_shinhan_file(filename: str, file_bytes: bytes) -> dict:
 
     saved_path = _save_upload_file(filename, file_bytes)
     parsed_events, errors, unknown_trade_names = parse_shinhan_xlsx(saved_path)
+    enriched_events = _enrich_events_with_ticker(parsed_events)
+
+    mapped_count = sum(1 for e in enriched_events if e.get("ticker"))
+    unmapped_name_count = sum(
+        1
+        for e in enriched_events
+        if e.get("ticker_name") and not e.get("ticker")
+    )
 
     return {
         "message": "shinhan upload parsed",
         "filename": filename,
         "saved_path": str(saved_path),
         "file_hash": _hash_bytes(file_bytes),
-        "parsed_count": len(parsed_events),
+        "parsed_count": len(enriched_events),
+        "mapped_count": mapped_count,
+        "unmapped_name_count": unmapped_name_count,
         "error_count": len(errors),
         "errors": errors,
         "unknown_trade_names": unknown_trade_names,
-        "parsed_preview": parsed_events[:20],
+        "parsed_preview": enriched_events[:20],
     }
 
 
@@ -139,3 +150,33 @@ def build_portfolio_summary() -> dict:
         "unrealized_pnl": round(unrealized_pnl, 2),
         "positions": positions,
     }
+
+def _enrich_events_with_ticker(parsed_events: list[dict]) -> list[dict]:
+    enriched: list[dict] = []
+
+    for event in parsed_events:
+        copied = dict(event)
+
+        raw_name = copied.get("ticker_name")
+        currency = copied.get("currency")
+
+        if raw_name and not copied.get("ticker"):
+            mapping = resolve_name(
+                raw_name=raw_name,
+                source_broker="shinhan",
+                currency=currency,
+                market_hint=None,
+            )
+            if mapping:
+                copied["ticker"] = mapping["ticker"]
+                copied["market"] = mapping.get("market")
+                copied["asset_type"] = mapping.get("asset_type")
+                copied["mapping_status"] = mapping.get("mapping_status")
+            else:
+                copied["mapping_status"] = "unmapped"
+        else:
+            copied["mapping_status"] = "not_applicable"
+
+        enriched.append(copied)
+
+    return enriched
