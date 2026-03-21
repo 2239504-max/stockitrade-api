@@ -159,6 +159,20 @@ def _is_effective_empty_row(row: list[Any]) -> bool:
             return False
     return True
 
+def _find_header_row(rows: list[list[Any]]) -> tuple[int | None, list[Any] | None]:
+    """
+    신한 엑셀은 상단에 계좌/기간 메타정보가 먼저 오고,
+    실제 헤더는 그 아래에 오는 경우가 있다.
+    그래서 '거래일자'와 '거래명'이 동시에 들어있는 row를 헤더로 간주한다.
+    """
+    for i, row in enumerate(rows):
+        row_str = [str(x) if x is not None else "" for x in row]
+        joined = " ".join(row_str)
+
+        if "거래일자" in joined and "거래명" in joined:
+            return i, row
+
+    return None, None
 
 def parse_shinhan_xlsx(
     path: Path,
@@ -171,24 +185,35 @@ def parse_shinhan_xlsx(
     if not rows:
         return [], [{"row": 0, "error": "empty file"}], {}
 
-    raw_headers = rows[0]
+    header_idx, raw_headers = _find_header_row(rows)
+
+    if raw_headers is None:
+        return [], [{
+            "row": 0,
+            "error": "header not found",
+            "preview_rows": [
+                [str(x) if x is not None else "" for x in row]
+                for row in rows[:5]
+            ],
+        }], {}
+
     headers = [_canon_header(col) for col in raw_headers]
     header_index = {name: idx for idx, name in enumerate(headers) if name}
 
     missing = REQUIRED_COLUMNS - set(header_index.keys())
     if missing:
         return [], [{
-            "row": 1,
+            "row": header_idx + 1,
             "error": f"missing required columns: {', '.join(sorted(missing))}",
             "raw_headers": [str(x) if x is not None else "" for x in raw_headers],
             "normalized_headers": headers,
         }], {}
-
+    
     parsed: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     unknown_trade_names: dict[str, int] = {}
 
-    for row_number, row in enumerate(rows[1:], start=2):
+    for row_number, row in enumerate(rows[header_idx + 1:], start=header_idx + 2):
         if _is_effective_empty_row(row):
             continue
 
