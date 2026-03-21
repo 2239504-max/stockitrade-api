@@ -9,9 +9,17 @@ def classify_trade_name(raw_trade_name: str) -> str:
     exact_map = {
         "이체입금": "CASH_IN",
         "대체입금": "CASH_IN",
-        "이용료입금": "CASH_IN",  # 일단 입금성 이벤트로 처리
+        "이용료입금": "CASH_IN",
+        "외화이체입금": "CASH_IN",
+
+        "이체출금": "CASH_OUT",
+        "대체출금": "CASH_OUT",
+
         "외화매수": "FX_BUY",
         "외화매도": "FX_SELL",
+        "외화매수(목표환율)": "FX_BUY",
+        "시간외외화매도(통합증거금)": "FX_SELL",
+
         "매수": "BUY",
         "매도": "SELL",
         "타사입고": "TRANSFER_IN_KIND",
@@ -29,6 +37,14 @@ def classify_trade_name(raw_trade_name: str) -> str:
         return "DIVIDEND"
     if "세금" in name:
         return "TAX"
+    if "외화매수" in name:
+        return "FX_BUY"
+    if "외화매도" in name:
+        return "FX_SELL"
+    if "입금" in name:
+        return "CASH_IN"
+    if "출금" in name:
+        return "CASH_OUT"
 
     return "UNKNOWN"
 
@@ -51,13 +67,10 @@ def map_shinhan_row_to_event(row_number: int, row: dict[str, Any]) -> Normalized
     settlement_amount = _to_float_or_none(row.get("settlement_amount"))
     amount = _to_float_or_none(row.get("amount"))
 
-    # 기본 금액 우선순위:
-    # 1) 정산금액
-    # 2) 거래금액
-    # 3) 수량*단가
-    if settlement_amount is not None:
+    # 기본 금액 우선순위
+    if settlement_amount not in (None, 0):
         final_amount = settlement_amount
-    elif amount is not None:
+    elif amount not in (None, 0):
         final_amount = amount
     elif quantity is not None and price is not None:
         final_amount = quantity * price
@@ -65,16 +78,17 @@ def map_shinhan_row_to_event(row_number: int, row: dict[str, Any]) -> Normalized
         final_amount = None
 
     # 이벤트별 보정
-    # 배당/현금입출금/세금 계열은 quantity/price보다 실제 금액 칼럼이 중요하다.
     if event_type in {"DIVIDEND", "CASH_IN", "CASH_OUT", "TAX", "FX_PNL_ADJUST"}:
-        if final_amount is None:
-            # 거래금액/정산금액 둘 다 없으면 quantity 쪽 숫자를 금액처럼 쓰는 fallback
-            if quantity is not None:
-                final_amount = quantity
-        # 이런 이벤트는 quantity를 포지션 수량으로 쓰지 않는 편이 안전
+        if final_amount is None and quantity is not None:
+            final_amount = quantity
         quantity = None
         if price is None:
             price = 0.0
+
+    # 주식/현물성 거래는 amount가 0으로 들어오면 quantity * price로 보정
+    if event_type in {"BUY", "SELL", "TRANSFER_IN_KIND"}:
+        if (final_amount in (None, 0)) and quantity is not None and price is not None:
+            final_amount = quantity * price
 
     return NormalizedEvent(
         event_type=event_type,
