@@ -1,4 +1,5 @@
 from typing import Any
+
 from app.schemas.events import NormalizedEvent
 
 
@@ -8,12 +9,14 @@ def classify_trade_name(raw_trade_name: str) -> str:
     exact_map = {
         "이체입금": "CASH_IN",
         "대체입금": "CASH_IN",
+        "이용료입금": "CASH_IN",  # 일단 입금성 이벤트로 처리
         "외화매수": "FX_BUY",
         "외화매도": "FX_SELL",
         "매수": "BUY",
         "매도": "SELL",
         "타사입고": "TRANSFER_IN_KIND",
         "시간외환전정산차금입금": "FX_PNL_ADJUST",
+        "배당금입금": "DIVIDEND",
     }
     if name in exact_map:
         return exact_map[name]
@@ -48,6 +51,10 @@ def map_shinhan_row_to_event(row_number: int, row: dict[str, Any]) -> Normalized
     settlement_amount = _to_float_or_none(row.get("settlement_amount"))
     amount = _to_float_or_none(row.get("amount"))
 
+    # 기본 금액 우선순위:
+    # 1) 정산금액
+    # 2) 거래금액
+    # 3) 수량*단가
     if settlement_amount is not None:
         final_amount = settlement_amount
     elif amount is not None:
@@ -56,6 +63,18 @@ def map_shinhan_row_to_event(row_number: int, row: dict[str, Any]) -> Normalized
         final_amount = quantity * price
     else:
         final_amount = None
+
+    # 이벤트별 보정
+    # 배당/현금입출금/세금 계열은 quantity/price보다 실제 금액 칼럼이 중요하다.
+    if event_type in {"DIVIDEND", "CASH_IN", "CASH_OUT", "TAX", "FX_PNL_ADJUST"}:
+        if final_amount is None:
+            # 거래금액/정산금액 둘 다 없으면 quantity 쪽 숫자를 금액처럼 쓰는 fallback
+            if quantity is not None:
+                final_amount = quantity
+        # 이런 이벤트는 quantity를 포지션 수량으로 쓰지 않는 편이 안전
+        quantity = None
+        if price is None:
+            price = 0.0
 
     return NormalizedEvent(
         event_type=event_type,
@@ -75,19 +94,41 @@ def map_shinhan_row_to_event(row_number: int, row: dict[str, Any]) -> Normalized
     )
 
 
-def _to_float_or_none(value):
+def _normalize_number(value: Any) -> str | None:
     if value in (None, ""):
         return None
-    return float(value)
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    # 흔한 표시 제거
+    text = text.replace(",", "")
+    text = text.replace(" ", "")
+    text = text.replace("\u00a0", "")  # non-breaking space
+
+    # 괄호 음수 처리: (1234.5) -> -1234.5
+    if text.startswith("(") and text.endswith(")"):
+        text = "-" + text[1:-1]
+
+    return text
 
 
-def _to_float_or_zero(value):
-    if value in (None, ""):
+def _to_float_or_none(value: Any):
+    normalized = _normalize_number(value)
+    if normalized is None:
+        return None
+    return float(normalized)
+
+
+def _to_float_or_zero(value: Any):
+    normalized = _normalize_number(value)
+    if normalized is None:
         return 0.0
-    return float(value)
+    return float(normalized)
 
 
-def _none_if_blank(value):
+def _none_if_blank(value: Any):
     if value in (None, ""):
         return None
     return str(value).strip()
