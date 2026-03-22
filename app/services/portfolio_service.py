@@ -178,50 +178,6 @@ def build_portfolio_summary() -> dict:
         "positions": positions,
     }
 
-def build_portfolio_summary() -> dict:
-    events = list_all_normalized_events()
-    holdings_result = build_portfolio_holdings()
-    cash_result = build_portfolio_cash()
-
-    dividend_by_currency: dict[str, float] = {}
-    tax_by_currency: dict[str, float] = {}
-
-    for event in events:
-        event_type = event.get("event_type")
-        currency = event.get("currency") or "KRW"
-        amount = float(event.get("amount") or 0)
-        tax = float(event.get("tax") or 0)
-
-        if event_type == "DIVIDEND":
-            dividend_by_currency[currency] = (
-                dividend_by_currency.get(currency, 0.0) + amount
-            )
-
-        elif event_type == "TAX":
-            tax_amount = amount if amount > 0 else tax
-            tax_by_currency[currency] = (
-                tax_by_currency.get(currency, 0.0) + tax_amount
-            )
-
-    total_holdings_count = holdings_result["count"]
-    holdings = holdings_result["holdings"]
-    realized_pnl_by_currency = holdings_result["realized_pnl_by_currency"]
-    cash = cash_result["cash"]
-
-    return {
-        "event_count": len(events),
-        "holdings_count": total_holdings_count,
-        "holdings": holdings,
-        "cash": cash,
-        "realized_pnl_by_currency": realized_pnl_by_currency,
-        "dividend_by_currency": {
-            k: round(v, 6) for k, v in dividend_by_currency.items()
-        },
-        "tax_by_currency": {
-            k: round(v, 6) for k, v in tax_by_currency.items()
-        },
-    }
-
 def _enrich_events_with_ticker(parsed_events: list[dict]) -> list[dict]:
     enriched: list[dict] = []
 
