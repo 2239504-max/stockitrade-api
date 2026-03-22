@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from app.core.config import settings
 from app.routers import domestic_stocks, overseas_stocks, domestic_derivatives, overseas_derivatives
-from app.routers import portfolio, market
+from app.routers import portfolio, market, events
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
@@ -27,3 +27,4 @@ app.include_router(overseas_stocks.router)
 app.include_router(domestic_derivatives.router)
 app.include_router(overseas_derivatives.router)
 app.include_router(portfolio.router)
+app.include_router(events.router)
