@@ -10,10 +10,15 @@ from app.services.trade_store import (
     insert_trade,
     list_trades,
 )
-from app.services.name_mapping_service import resolve_name
+
+from app.services.name_mapping_service import (
+    resolve_name,
+    calculate_unmapped_name_priorities,
+)
+from app.services.name_mapping_seed import seed_name_mappings
 
 init_db()
-
+seed_name_mappings()
 
 def _save_upload_file(filename: str, file_bytes: bytes) -> Path:
     upload_dir = Path(settings.upload_dir)
