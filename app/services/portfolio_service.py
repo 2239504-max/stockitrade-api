@@ -42,10 +42,16 @@ def ingest_shinhan_file(filename: str, file_bytes: bytes) -> dict:
     enriched_events = _enrich_events_with_ticker(parsed_events)
 
     mapped_count = sum(1 for e in enriched_events if e.get("ticker"))
+    NON_ASSET_NAMES = {"USD", "KRW", "JPY", "EUR"}
+
     unmapped_name_count = sum(
         1
         for e in enriched_events
-        if e.get("ticker_name") and not e.get("ticker")
+        if (
+            e.get("ticker_name")
+            and not e.get("ticker")
+            and e.get("ticker_name") not in NON_ASSET_NAMES
+        )
     )
     unmapped_name_priorities = calculate_unmapped_name_priorities(enriched_events)
 
