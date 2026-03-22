@@ -37,12 +37,14 @@ def resolve_name(
 def calculate_unmapped_name_priorities(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     freq: dict[str, dict[str, Any]] = {}
 
-    for e in events:
-        name = e.get("ticker_name")
-        if not name:
-            continue
-        if e.get("ticker"):
-            continue
+        for e in events:
+            name = e.get("ticker_name")
+            if not name:
+                continue
+            if e.get("ticker"):
+                continue
+            if name in {"USD", "KRW", "JPY", "EUR"}:
+                continue   
 
         if name not in freq:
             freq[name] = {
