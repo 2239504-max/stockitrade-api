@@ -4,8 +4,6 @@ from app.schemas.portfolio import ManualTradeRequest
 from app.services.portfolio_service import (
     ingest_shinhan_file,
     create_manual_trade,
-    build_portfolio_holdings,
-    build_portfolio_cash,
     build_portfolio_summary,
 )
 
