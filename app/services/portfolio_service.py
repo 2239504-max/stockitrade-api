@@ -17,7 +17,14 @@ from app.services.name_mapping_service import (
 )
 from app.services.name_mapping_seed import seed_name_mappings
 
+from app.services.event_store import (
+    init_event_db,
+    insert_normalized_events,
+    count_events_by_file_hash,
+)
+
 init_db()
+init_event_db()
 seed_name_mappings()
 
 def _save_upload_file(filename: str, file_bytes: bytes) -> Path:
@@ -37,30 +44,36 @@ def ingest_shinhan_file(filename: str, file_bytes: bytes) -> dict:
     if not filename.endswith(".xlsx"):
         raise ValueError("Only .xlsx files are allowed")
 
+    file_hash = _hash_bytes(file_bytes)
+    existing_count = count_events_by_file_hash(file_hash)
+    if existing_count > 0:
+        raise ValueError(f"This file was already uploaded before: {existing_count} events")
+
     saved_path = _save_upload_file(filename, file_bytes)
     parsed_events, errors, unknown_trade_names = parse_shinhan_xlsx(saved_path)
     enriched_events = _enrich_events_with_ticker(parsed_events)
 
-    mapped_count = sum(1 for e in enriched_events if e.get("ticker"))
-    NON_ASSET_NAMES = {"USD", "KRW", "JPY", "EUR"}
+    inserted_count = insert_normalized_events(enriched_events, file_hash=file_hash)
 
+    mapped_count = sum(1 for e in enriched_events if e.get("ticker"))
     unmapped_name_count = sum(
         1
         for e in enriched_events
         if (
             e.get("ticker_name")
             and not e.get("ticker")
-            and e.get("ticker_name") not in NON_ASSET_NAMES
+            and e.get("ticker_name") not in {"USD", "KRW", "JPY", "EUR"}
         )
     )
     unmapped_name_priorities = calculate_unmapped_name_priorities(enriched_events)
 
     return {
-        "message": "shinhan upload parsed",
+        "message": "shinhan upload parsed and stored",
         "filename": filename,
         "saved_path": str(saved_path),
-        "file_hash": _hash_bytes(file_bytes),
+        "file_hash": file_hash,
         "parsed_count": len(enriched_events),
+        "inserted_count": inserted_count,
         "mapped_count": mapped_count,
         "unmapped_name_count": unmapped_name_count,
         "error_count": len(errors),
