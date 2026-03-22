@@ -10,10 +10,15 @@ from app.services.trade_store import (
     insert_trade,
     list_trades,
 )
-from app.services.name_mapping_service import resolve_name
+
+from app.services.name_mapping_service import (
+    resolve_name,
+    calculate_unmapped_name_priorities,
+)
+from app.services.name_mapping_seed import seed_name_mappings
 
 init_db()
-
+seed_name_mappings()
 
 def _save_upload_file(filename: str, file_bytes: bytes) -> Path:
     upload_dir = Path(settings.upload_dir)
@@ -42,6 +47,7 @@ def ingest_shinhan_file(filename: str, file_bytes: bytes) -> dict:
         for e in enriched_events
         if e.get("ticker_name") and not e.get("ticker")
     )
+    unmapped_name_priorities = calculate_unmapped_name_priorities(enriched_events)
 
     return {
         "message": "shinhan upload parsed",
@@ -54,7 +60,9 @@ def ingest_shinhan_file(filename: str, file_bytes: bytes) -> dict:
         "error_count": len(errors),
         "errors": errors,
         "unknown_trade_names": unknown_trade_names,
-        "parsed_preview": enriched_events[:20],
+        "unmapped_name_priorities": unmapped_name_priorities[:30],
+        "parsed_preview_head": enriched_events[:20],
+        "parsed_preview_tail": enriched_events[-20:],
     }
 
 
