@@ -42,7 +42,7 @@ COMMON_NAME_MAPPINGS = [
         "asset_type": "etf",
         "currency": "USD",
     },
-        {
+    {
         "raw_name": "USD 버티브 홀딩스",
         "normalized_name": "버티브 홀딩스",
         "ticker": "VRT",
