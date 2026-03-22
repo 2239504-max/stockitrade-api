@@ -182,6 +182,36 @@ COMMON_NAME_MAPPINGS = [
         "asset_type": "stock",
         "currency": "KRW",
     },
+        {
+        "raw_name": "USD ProShares VIX Short-Term Futures 1.5배",
+        "normalized_name": "ProShares VIX Short-Term Futures 1.5배",
+        "ticker": "UVXY",
+        "canonical_name": "ProShares Ultra VIX Short-Term Futures ETF",
+        "exchange": "BATS",
+        "market": "US",
+        "asset_type": "etf",
+        "currency": "USD",
+    },
+    {
+        "raw_name": "USD VolatilityShares VIX 선물 2X ETF",
+        "normalized_name": "VolatilityShares VIX 선물 2X ETF",
+        "ticker": "UVIX",
+        "canonical_name": "2x Long VIX Futures ETF",
+        "exchange": "BATS",
+        "market": "US",
+        "asset_type": "etf",
+        "currency": "USD",
+    },
+    {
+        "raw_name": "USD Direxion 테슬라 2X ETF",
+        "normalized_name": "Direxion 테슬라 2X ETF",
+        "ticker": "TSLL",
+        "canonical_name": "Direxion Daily TSLA Bull 2X Shares",
+        "exchange": "NASDAQ",
+        "market": "US",
+        "asset_type": "etf",
+        "currency": "USD",
+    },
 ]
 
 
