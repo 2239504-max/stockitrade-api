@@ -21,6 +21,7 @@ from app.services.event_store import (
     init_event_db,
     insert_normalized_events,
     count_events_by_file_hash,
+    list_all_normalized_events,
 )
 
 init_db()
