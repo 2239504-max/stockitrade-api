@@ -95,87 +95,36 @@ def create_manual_trade(payload: dict) -> dict:
 
 
 def build_portfolio_summary() -> dict:
-    trades = list_trades()
+    holdings_result = build_portfolio_holdings()
+    cash_result = build_portfolio_cash()
 
-    lots: dict[str, dict] = {}
-    realized_pnl = 0.0
-    cash = 0.0
+    holdings = holdings_result.get("holdings", [])
+    cash = cash_result.get("cash", [])
+    realized_pnl_by_currency = holdings_result.get("realized_pnl_by_currency", {})
 
-    for trade in trades:
-        ticker = trade["ticker"]
-        side = str(trade["side"]).lower()
-        qty = float(trade["quantity"])
-        price = float(trade["price"])
-        fee = float(trade["fee"] or 0)
+    position_count_by_currency: dict[str, int] = {}
+    holding_cost_basis_by_currency: dict[str, float] = {}
 
-        if ticker not in lots:
-            lots[ticker] = {
-                "quantity": 0.0,
-                "cost_basis": 0.0,
-                "market": trade.get("market"),
-                "currency": trade.get("currency"),
-            }
-
-        bucket = lots[ticker]
-
-        if side == "buy":
-            bucket["cost_basis"] += qty * price + fee
-            bucket["quantity"] += qty
-            cash -= qty * price + fee
-
-        elif side == "sell":
-            if bucket["quantity"] <= 0:
-                avg_cost = 0.0
-            else:
-                avg_cost = bucket["cost_basis"] / bucket["quantity"]
-
-            realized_pnl += (price - avg_cost) * qty - fee
-            bucket["quantity"] -= qty
-            bucket["cost_basis"] -= avg_cost * qty
-            cash += qty * price - fee
-
-    positions = []
-    market_value = 0.0
-    unrealized_pnl = 0.0
-
-    for ticker, bucket in lots.items():
-        qty = bucket["quantity"]
-        if abs(qty) <= 0:
-            continue
-
-        avg_cost = bucket["cost_basis"] / qty if qty else 0.0
-        market = bucket.get("market") or "US"
-
-        quote = get_quote(ticker, market=market)
-        current_price = float(quote["price"])
-
-        position_market_value = qty * current_price
-        position_unrealized = (current_price - avg_cost) * qty
-
-        positions.append({
-            "ticker": ticker,
-            "quantity": round(qty, 6),
-            "avg_cost": round(avg_cost, 4),
-            "current_price": round(current_price, 4),
-            "market_value": round(position_market_value, 2),
-            "unrealized_pnl": round(position_unrealized, 2),
-            "realized_pnl": 0.0,
-            "market": market,
-            "currency": bucket.get("currency") or quote.get("currency"),
-        })
-
-        market_value += position_market_value
-        unrealized_pnl += position_unrealized
+    for item in holdings:
+        currency = item.get("currency") or "UNKNOWN"
+        position_count_by_currency[currency] = position_count_by_currency.get(currency, 0) + 1
+        holding_cost_basis_by_currency[currency] = (
+            holding_cost_basis_by_currency.get(currency, 0.0)
+            + float(item.get("cost_basis") or 0.0)
+        )
 
     return {
-        "total_trades": len(trades),
-        "total_positions": len(positions),
-        "cash": round(cash, 2),
-        "market_value": round(market_value, 2),
-        "total_value": round(cash + market_value, 2),
-        "realized_pnl": round(realized_pnl, 2),
-        "unrealized_pnl": round(unrealized_pnl, 2),
-        "positions": positions,
+        "holdings_count": holdings_result.get("count", 0),
+        "cash_count": cash_result.get("count", 0),
+        "positions": holdings,
+        "cash": cash,
+        "realized_pnl_by_currency": {
+            k: round(v, 6) for k, v in realized_pnl_by_currency.items()
+        },
+        "position_count_by_currency": position_count_by_currency,
+        "holding_cost_basis_by_currency": {
+            k: round(v, 6) for k, v in holding_cost_basis_by_currency.items()
+        },
     }
 
 def build_portfolio_cash() -> dict:
