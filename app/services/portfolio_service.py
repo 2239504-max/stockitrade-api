@@ -275,6 +275,112 @@ def build_portfolio_cash() -> dict:
         "cash": cash_list,
     }
 
+def build_portfolio_holdings() -> dict:
+    events = list_all_normalized_events()
+
+    positions: dict[str, dict] = {}
+    realized_pnl_by_currency: dict[str, float] = {}
+
+    for event in events:
+        event_type = event.get("event_type")
+        ticker = event.get("ticker")
+
+        # holdings 대상 이벤트만 반영
+        if event_type not in {"BUY", "SELL", "TRANSFER_IN_KIND"}:
+            continue
+
+        # ticker 없는 이벤트는 holdings 계산에서 제외
+        if not ticker:
+            continue
+
+        quantity = float(event.get("quantity") or 0)
+        price = float(event.get("price") or 0)
+        amount = float(event.get("amount") or 0)
+        fee = float(event.get("fee") or 0)
+        currency = event.get("currency") or "UNKNOWN"
+
+        if ticker not in positions:
+            positions[ticker] = {
+                "ticker": ticker,
+                "ticker_name": event.get("ticker_name"),
+                "quantity": 0.0,
+                "cost_basis": 0.0,
+                "avg_cost": 0.0,
+                "market": event.get("market"),
+                "asset_type": event.get("asset_type"),
+                "currency": currency,
+                "realized_pnl": 0.0,
+                "last_event_date": event.get("date"),
+            }
+
+        pos = positions[ticker]
+
+        if event_type in {"BUY", "TRANSFER_IN_KIND"}:
+            buy_cost = amount if amount > 0 else (quantity * price)
+            buy_cost += fee
+
+            pos["cost_basis"] += buy_cost
+            pos["quantity"] += quantity
+            pos["avg_cost"] = (
+                pos["cost_basis"] / pos["quantity"]
+                if pos["quantity"] > 0
+                else 0.0
+            )
+
+        elif event_type == "SELL":
+            if pos["quantity"] <= 0:
+                continue
+
+            avg_cost_before_sell = pos["cost_basis"] / pos["quantity"]
+            sell_proceeds = amount if amount > 0 else (quantity * price)
+            sell_proceeds -= fee
+
+            realized = sell_proceeds - (avg_cost_before_sell * quantity)
+
+            pos["realized_pnl"] += realized
+            pos["quantity"] -= quantity
+            pos["cost_basis"] -= avg_cost_before_sell * quantity
+            pos["avg_cost"] = (
+                pos["cost_basis"] / pos["quantity"]
+                if pos["quantity"] > 0
+                else 0.0
+            )
+
+            realized_pnl_by_currency[currency] = (
+                realized_pnl_by_currency.get(currency, 0.0) + realized
+            )
+
+        pos["last_event_date"] = event.get("date")
+
+    holdings = []
+    for pos in positions.values():
+        # 완전 청산된 종목은 제외
+        if abs(pos["quantity"]) <= 1e-12:
+            continue
+
+        holdings.append({
+            "ticker": pos["ticker"],
+            "ticker_name": pos["ticker_name"],
+            "quantity": round(pos["quantity"], 6),
+            "avg_cost": round(pos["avg_cost"], 6),
+            "cost_basis": round(pos["cost_basis"], 6),
+            "market": pos["market"],
+            "asset_type": pos["asset_type"],
+            "currency": pos["currency"],
+            "realized_pnl": round(pos["realized_pnl"], 6),
+            "last_event_date": pos["last_event_date"],
+        })
+
+    holdings.sort(key=lambda x: (x["currency"] or "", x["ticker"] or ""))
+
+    return {
+        "count": len(holdings),
+        "holdings": holdings,
+        "realized_pnl_by_currency": {
+            k: round(v, 6) for k, v in realized_pnl_by_currency.items()
+        },
+    }
+
 def _enrich_events_with_ticker(parsed_events: list[dict]) -> list[dict]:
     enriched: list[dict] = []
 
