@@ -178,6 +178,103 @@ def build_portfolio_summary() -> dict:
         "positions": positions,
     }
 
+def build_portfolio_cash() -> dict:
+    events = list_all_normalized_events()
+
+    cash_by_currency: dict[str, dict] = {}
+
+    def ensure_bucket(currency: str) -> dict:
+        if currency not in cash_by_currency:
+            cash_by_currency[currency] = {
+                "currency": currency,
+                "net_cash": 0.0,
+                "cash_in": 0.0,
+                "cash_out": 0.0,
+                "buy_out": 0.0,
+                "sell_in": 0.0,
+                "dividend_in": 0.0,
+                "tax_out": 0.0,
+                "fx_buy_out": 0.0,
+                "fx_sell_in": 0.0,
+                "fx_pnl_adjust": 0.0,
+            }
+        return cash_by_currency[currency]
+
+    for event in events:
+        event_type = event.get("event_type")
+        currency = event.get("currency") or "KRW"
+
+        amount = float(event.get("amount") or 0)
+        fee = float(event.get("fee") or 0)
+        tax = float(event.get("tax") or 0)
+
+        bucket = ensure_bucket(currency)
+
+        if event_type == "CASH_IN":
+            bucket["cash_in"] += amount
+            bucket["net_cash"] += amount
+
+        elif event_type == "CASH_OUT":
+            bucket["cash_out"] += amount
+            bucket["net_cash"] -= amount
+
+        elif event_type == "BUY":
+            cash_delta = amount + fee
+            bucket["buy_out"] += cash_delta
+            bucket["net_cash"] -= cash_delta
+
+        elif event_type == "SELL":
+            cash_delta = amount - fee
+            bucket["sell_in"] += cash_delta
+            bucket["net_cash"] += cash_delta
+
+        elif event_type == "DIVIDEND":
+            dividend_amount = amount
+            bucket["dividend_in"] += dividend_amount
+            bucket["net_cash"] += dividend_amount
+
+        elif event_type == "TAX":
+            tax_amount = amount if amount > 0 else tax
+            bucket["tax_out"] += tax_amount
+            bucket["net_cash"] -= tax_amount
+
+        elif event_type == "FX_BUY":
+            bucket["fx_buy_out"] += amount
+            bucket["net_cash"] -= amount
+
+        elif event_type == "FX_SELL":
+            bucket["fx_sell_in"] += amount
+            bucket["net_cash"] += amount
+
+        elif event_type == "FX_PNL_ADJUST":
+            bucket["fx_pnl_adjust"] += amount
+            bucket["net_cash"] += amount
+
+        # TRANSFER_IN_KIND 는 현금 이동이 아니라 종목 입고이므로 cash에서는 제외
+
+    cash_list = []
+    for bucket in cash_by_currency.values():
+        cash_list.append({
+            "currency": bucket["currency"],
+            "net_cash": round(bucket["net_cash"], 6),
+            "cash_in": round(bucket["cash_in"], 6),
+            "cash_out": round(bucket["cash_out"], 6),
+            "buy_out": round(bucket["buy_out"], 6),
+            "sell_in": round(bucket["sell_in"], 6),
+            "dividend_in": round(bucket["dividend_in"], 6),
+            "tax_out": round(bucket["tax_out"], 6),
+            "fx_buy_out": round(bucket["fx_buy_out"], 6),
+            "fx_sell_in": round(bucket["fx_sell_in"], 6),
+            "fx_pnl_adjust": round(bucket["fx_pnl_adjust"], 6),
+        })
+
+    cash_list.sort(key=lambda x: x["currency"])
+
+    return {
+        "count": len(cash_list),
+        "cash": cash_list,
+    }
+
 def _enrich_events_with_ticker(parsed_events: list[dict]) -> list[dict]:
     enriched: list[dict] = []
 
