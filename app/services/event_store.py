@@ -81,22 +81,6 @@ def insert_normalized_event(event: dict[str, Any], file_hash: str | None = None)
         )
         return int(cursor.lastrowid)
 
-def list_all_normalized_events() -> list[dict[str, Any]]:
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                id, date, event_type, ticker, ticker_name, quantity, price, amount,
-                fee, tax, currency, account, memo, raw_trade_name,
-                source_broker, source_row_number, market, asset_type,
-                mapping_status, file_hash, created_at
-            FROM normalized_events
-            ORDER BY date, id
-            """
-        ).fetchall()
-
-    return [dict(row) for row in rows]
-
 
 def insert_normalized_events(events: list[dict[str, Any]], file_hash: str | None = None) -> int:
     inserted = 0
@@ -156,3 +140,20 @@ def count_events_by_file_hash(file_hash: str) -> int:
             (file_hash,),
         ).fetchone()
     return int(row["cnt"])
+
+def list_all_normalized_events() -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                id, date, event_type, ticker, ticker_name, quantity, price, amount,
+                fee, tax, currency, account, memo, raw_trade_name,
+                source_broker, source_row_number, market, asset_type,
+                mapping_status, file_hash, created_at
+            FROM normalized_events
+            ORDER BY date, id
+            """
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
