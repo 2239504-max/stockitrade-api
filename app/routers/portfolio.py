@@ -46,3 +46,10 @@ def get_portfolio_cash():
         return build_portfolio_cash()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@router.get("/portfolio/holdings")
+def get_portfolio_holdings():
+    try:
+        return build_portfolio_holdings()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
