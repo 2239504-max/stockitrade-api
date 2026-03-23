@@ -150,57 +150,105 @@ def build_portfolio_cash() -> dict:
             }
         return cash_by_currency[currency]
 
+    def add_cash(currency: str, field: str, delta: float, is_inflow: bool):
+        bucket = ensure_bucket(currency)
+        bucket[field] += delta
+        if is_inflow:
+            bucket["net_cash"] += delta
+        else:
+            bucket["net_cash"] -= delta
+
     for event in events:
         event_type = event.get("event_type")
-        currency = event.get("currency") or "KRW"
+        event_currency = event.get("currency") or "KRW"
+        ticker_name = event.get("ticker_name")
 
         amount = float(event.get("amount") or 0)
+        quantity = float(event.get("quantity") or 0)
+        price = float(event.get("price") or 0)
         fee = float(event.get("fee") or 0)
         tax = float(event.get("tax") or 0)
 
-        bucket = ensure_bucket(currency)
-
         if event_type == "CASH_IN":
-            bucket["cash_in"] += amount
-            bucket["net_cash"] += amount
+            # 일반 입금은 KRW
+            if not ticker_name:
+                add_cash("KRW", "cash_in", amount, True)
+
+            # 외화이체입금처럼 ticker_name == USD 인 경우:
+            # amount가 KRW 환산액이고 price가 환율이면 USD 금액을 역산
+            elif ticker_name == "USD":
+                usd_amount = 0.0
+                if quantity > 0:
+                    usd_amount = quantity
+                elif amount > 0 and price > 0:
+                    usd_amount = amount / price
+
+                if usd_amount > 0:
+                    add_cash("USD", "cash_in", usd_amount, True)
+
+            else:
+                add_cash(event_currency, "cash_in", amount, True)
 
         elif event_type == "CASH_OUT":
-            bucket["cash_out"] += amount
-            bucket["net_cash"] -= amount
+            if not ticker_name:
+                add_cash("KRW", "cash_out", amount, False)
+            elif ticker_name == "USD":
+                usd_amount = 0.0
+                if quantity > 0:
+                    usd_amount = quantity
+                elif amount > 0 and price > 0:
+                    usd_amount = amount / price
+
+                if usd_amount > 0:
+                    add_cash("USD", "cash_out", usd_amount, False)
+            else:
+                add_cash(event_currency, "cash_out", amount, False)
 
         elif event_type == "BUY":
             cash_delta = amount + fee
-            bucket["buy_out"] += cash_delta
-            bucket["net_cash"] -= cash_delta
+            add_cash(event_currency, "buy_out", cash_delta, False)
 
         elif event_type == "SELL":
             cash_delta = amount - fee
-            bucket["sell_in"] += cash_delta
-            bucket["net_cash"] += cash_delta
+            add_cash(event_currency, "sell_in", cash_delta, True)
 
         elif event_type == "DIVIDEND":
-            dividend_amount = amount
-            bucket["dividend_in"] += dividend_amount
-            bucket["net_cash"] += dividend_amount
+            # 배당은 해당 통화 inflow
+            if amount > 0:
+                add_cash(event_currency, "dividend_in", amount, True)
 
         elif event_type == "TAX":
+            # 세금은 기본적으로 같은 통화에서 빠진다고 가정
             tax_amount = amount if amount > 0 else tax
-            bucket["tax_out"] += tax_amount
-            bucket["net_cash"] -= tax_amount
+            if tax_amount > 0:
+                add_cash(event_currency, "tax_out", tax_amount, False)
 
         elif event_type == "FX_BUY":
-            bucket["fx_buy_out"] += amount
-            bucket["net_cash"] -= amount
+            # 외화 매수:
+            # KRW 유출 = amount
+            # USD 유입 = quantity
+            if amount > 0:
+                add_cash("KRW", "fx_buy_out", amount, False)
+            if quantity > 0:
+                add_cash(event_currency, "cash_in", quantity, True)
 
         elif event_type == "FX_SELL":
-            bucket["fx_sell_in"] += amount
-            bucket["net_cash"] += amount
+            # 외화 매도:
+            # USD 유출 = quantity
+            # KRW 유입 = amount
+            if quantity > 0:
+                add_cash(event_currency, "fx_sell_in", quantity, False)
+            if amount > 0:
+                add_cash("KRW", "cash_in", amount, True)
 
         elif event_type == "FX_PNL_ADJUST":
-            bucket["fx_pnl_adjust"] += amount
-            bucket["net_cash"] += amount
+            # 환전 정산차금은 보통 KRW 조정으로 본다
+            if amount > 0:
+                add_cash("KRW", "fx_pnl_adjust", amount, True)
+            elif amount < 0:
+                add_cash("KRW", "fx_pnl_adjust", abs(amount), False)
 
-        # TRANSFER_IN_KIND 는 현금 이동이 아니라 종목 입고이므로 cash에서는 제외
+        # TRANSFER_IN_KIND 는 현금이 아니라 종목 이동이라 제외
 
     cash_list = []
     for bucket in cash_by_currency.values():
