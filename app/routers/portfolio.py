@@ -4,6 +4,8 @@ from app.schemas.portfolio import ManualTradeRequest
 from app.services.portfolio_service import (
     ingest_shinhan_file,
     create_manual_trade,
+    build_portfolio_holdings,
+    build_portfolio_cash,
     build_portfolio_summary,
 )
 
@@ -35,5 +37,12 @@ def post_manual_trade(trade: ManualTradeRequest):
 def get_portfolio_summary():
     try:
         return build_portfolio_summary()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@router.get("/portfolio/cash")
+def get_portfolio_cash():
+    try:
+        return build_portfolio_cash()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
