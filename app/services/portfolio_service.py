@@ -28,6 +28,23 @@ init_db()
 init_event_db()
 seed_name_mappings()
 
+KNOWN_CURRENCY_CODES = {
+    "KRW",
+    "USD",
+    "JPY",
+    "EUR",
+    "HKD",
+    "CNY",
+    "CNH",
+    "GBP",
+    "AUD",
+    "CAD",
+    "SGD",
+    "CHF",
+    "NZD",
+}
+
+
 def _save_upload_file(filename: str, file_bytes: bytes) -> Path:
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -39,6 +56,132 @@ def _save_upload_file(filename: str, file_bytes: bytes) -> Path:
 
 def _hash_bytes(file_bytes: bytes) -> str:
     return hashlib.sha256(file_bytes).hexdigest()
+
+
+def _normalize_currency(value) -> str | None:
+    if value is None:
+        return None
+
+    text = str(value).strip().upper()
+    if not text or text == "UNKNOWN":
+        return None
+
+    return text
+
+
+def _coalesce_currency(*values) -> str:
+    for value in values:
+        normalized = _normalize_currency(value)
+        if normalized:
+            return normalized
+    return "UNKNOWN"
+
+
+def _build_tax_event_index(events: list[dict]) -> dict[tuple[str, str, float], list[int]]:
+    tax_index: dict[tuple[str, str, float], list[int]] = {}
+
+    for event in events:
+        if event.get("event_type") != "TAX":
+            continue
+
+        currency = _coalesce_currency(event.get("currency"))
+        tax_amount = float(event.get("amount") or event.get("tax") or 0)
+        if tax_amount <= 0:
+            continue
+
+        key = (
+            str(event.get("date") or ""),
+            currency,
+            round(tax_amount, 6),
+        )
+        tax_index.setdefault(key, []).append(int(event.get("source_row_number") or 0))
+
+    for row_numbers in tax_index.values():
+        row_numbers.sort()
+
+    return tax_index
+
+
+def _has_nearby_standalone_tax(
+    event: dict,
+    tax_amount: float,
+    tax_index: dict[tuple[str, str, float], list[int]],
+    row_window: int = 3,
+) -> bool:
+    if tax_amount <= 0:
+        return False
+
+    key = (
+        str(event.get("date") or ""),
+        _coalesce_currency(event.get("currency")),
+        round(tax_amount, 6),
+    )
+    row_number = int(event.get("source_row_number") or 0)
+
+    for candidate in tax_index.get(key, []):
+        if abs(candidate - row_number) <= row_window:
+            return True
+
+    return False
+
+
+def _embedded_sell_tax(event: dict, tax_index: dict[tuple[str, str, float], list[int]]) -> float:
+    tax = float(event.get("tax") or 0)
+    if tax <= 0:
+        return 0.0
+
+    if _has_nearby_standalone_tax(event, tax, tax_index):
+        return 0.0
+
+    return tax
+
+
+def _resolve_plain_cash_event(event: dict) -> tuple[str, float, dict | None]:
+    event_currency = _normalize_currency(event.get("currency"))
+    ticker_name = _normalize_currency(event.get("ticker_name"))
+    amount = float(event.get("amount") or 0)
+    quantity = float(event.get("quantity") or 0)
+    price = float(event.get("price") or 0)
+
+    inferred_currency = event_currency
+    inferred_amount = amount
+    anomaly = None
+
+    if ticker_name in KNOWN_CURRENCY_CODES:
+        inferred_currency = ticker_name
+
+        if quantity > 0:
+            inferred_amount = quantity
+        elif event_currency and event_currency != ticker_name and amount > 0 and price > 0:
+            inferred_amount = amount / price
+        else:
+            inferred_amount = amount
+
+    if inferred_currency is None:
+        inferred_currency = "KRW"
+        anomaly = {
+            "reason": "cash_event_missing_currency_defaulted_to_krw",
+            "date": event.get("date"),
+            "raw_trade_name": event.get("raw_trade_name"),
+            "source_row_number": event.get("source_row_number"),
+        }
+
+    return inferred_currency, inferred_amount, anomaly
+
+
+def _resolve_fx_target(event: dict) -> tuple[str, float]:
+    target_currency = _coalesce_currency(event.get("currency"), event.get("ticker_name"))
+    amount = float(event.get("amount") or 0)
+    quantity = float(event.get("quantity") or 0)
+    price = float(event.get("price") or 0)
+
+    if quantity > 0:
+        return target_currency, quantity
+
+    if amount > 0 and price > 0 and target_currency != "KRW":
+        return target_currency, amount / price
+
+    return target_currency, 0.0
 
 
 def ingest_shinhan_file(filename: str, file_bytes: bytes) -> dict:
@@ -105,6 +248,7 @@ def build_portfolio_summary() -> dict:
 
     position_count_by_currency: dict[str, int] = {}
     holding_cost_basis_by_currency: dict[str, float] = {}
+    open_positions_realized_pnl_by_currency: dict[str, float] = {}
 
     for item in holdings:
         currency = item.get("currency") or "UNKNOWN"
@@ -112,6 +256,10 @@ def build_portfolio_summary() -> dict:
         holding_cost_basis_by_currency[currency] = (
             holding_cost_basis_by_currency.get(currency, 0.0)
             + float(item.get("cost_basis") or 0.0)
+        )
+        open_positions_realized_pnl_by_currency[currency] = (
+            open_positions_realized_pnl_by_currency.get(currency, 0.0)
+            + float(item.get("realized_pnl") or 0.0)
         )
 
     return {
@@ -122,16 +270,23 @@ def build_portfolio_summary() -> dict:
         "realized_pnl_by_currency": {
             k: round(v, 6) for k, v in realized_pnl_by_currency.items()
         },
+        "open_positions_realized_pnl_by_currency": {
+            k: round(v, 6) for k, v in open_positions_realized_pnl_by_currency.items()
+        },
         "position_count_by_currency": position_count_by_currency,
         "holding_cost_basis_by_currency": {
             k: round(v, 6) for k, v in holding_cost_basis_by_currency.items()
         },
+        "anomalies": holdings_result.get("anomalies", []) + cash_result.get("anomalies", []),
     }
+
 
 def build_portfolio_cash() -> dict:
     events = list_all_normalized_events()
+    tax_index = _build_tax_event_index(events)
 
     cash_by_currency: dict[str, dict] = {}
+    anomalies: list[dict] = []
 
     def ensure_bucket(currency: str) -> dict:
         if currency not in cash_by_currency:
@@ -145,6 +300,8 @@ def build_portfolio_cash() -> dict:
                 "dividend_in": 0.0,
                 "tax_out": 0.0,
                 "fx_buy_out": 0.0,
+                "fx_buy_in": 0.0,
+                "fx_sell_out": 0.0,
                 "fx_sell_in": 0.0,
                 "fx_pnl_adjust": 0.0,
             }
@@ -160,95 +317,100 @@ def build_portfolio_cash() -> dict:
 
     for event in events:
         event_type = event.get("event_type")
-        event_currency = event.get("currency") or "KRW"
-        ticker_name = event.get("ticker_name")
+        event_currency = _normalize_currency(event.get("currency"))
 
         amount = float(event.get("amount") or 0)
-        quantity = float(event.get("quantity") or 0)
-        price = float(event.get("price") or 0)
         fee = float(event.get("fee") or 0)
         tax = float(event.get("tax") or 0)
 
         if event_type == "CASH_IN":
-            # 일반 입금은 KRW
-            if not ticker_name:
-                add_cash("KRW", "cash_in", amount, True)
-
-            # 외화이체입금처럼 ticker_name == USD 인 경우:
-            # amount가 KRW 환산액이고 price가 환율이면 USD 금액을 역산
-            elif ticker_name == "USD":
-                usd_amount = 0.0
-                if quantity > 0:
-                    usd_amount = quantity
-                elif amount > 0 and price > 0:
-                    usd_amount = amount / price
-
-                if usd_amount > 0:
-                    add_cash("USD", "cash_in", usd_amount, True)
-
-            else:
-                add_cash(event_currency, "cash_in", amount, True)
+            currency, cash_amount, anomaly = _resolve_plain_cash_event(event)
+            if anomaly:
+                anomalies.append(anomaly)
+            if cash_amount > 0:
+                add_cash(currency, "cash_in", cash_amount, True)
 
         elif event_type == "CASH_OUT":
-            if not ticker_name:
-                add_cash("KRW", "cash_out", amount, False)
-            elif ticker_name == "USD":
-                usd_amount = 0.0
-                if quantity > 0:
-                    usd_amount = quantity
-                elif amount > 0 and price > 0:
-                    usd_amount = amount / price
-
-                if usd_amount > 0:
-                    add_cash("USD", "cash_out", usd_amount, False)
-            else:
-                add_cash(event_currency, "cash_out", amount, False)
+            currency, cash_amount, anomaly = _resolve_plain_cash_event(event)
+            if anomaly:
+                anomalies.append(anomaly)
+            if cash_amount > 0:
+                add_cash(currency, "cash_out", cash_amount, False)
 
         elif event_type == "BUY":
+            trade_currency = _coalesce_currency(event_currency)
             cash_delta = amount + fee
-            add_cash(event_currency, "buy_out", cash_delta, False)
+            if cash_delta > 0:
+                add_cash(trade_currency, "buy_out", cash_delta, False)
+            elif trade_currency == "UNKNOWN":
+                anomalies.append({
+                    "reason": "buy_event_missing_currency",
+                    "ticker": event.get("ticker"),
+                    "date": event.get("date"),
+                    "source_row_number": event.get("source_row_number"),
+                })
 
         elif event_type == "SELL":
-            cash_delta = amount - fee
-            add_cash(event_currency, "sell_in", cash_delta, True)
+            trade_currency = _coalesce_currency(event_currency)
+            embedded_tax = _embedded_sell_tax(event, tax_index)
+            cash_delta = amount - fee - embedded_tax
+            if cash_delta > 0:
+                add_cash(trade_currency, "sell_in", cash_delta, True)
+            elif trade_currency == "UNKNOWN":
+                anomalies.append({
+                    "reason": "sell_event_missing_currency",
+                    "ticker": event.get("ticker"),
+                    "date": event.get("date"),
+                    "source_row_number": event.get("source_row_number"),
+                })
 
         elif event_type == "DIVIDEND":
-            # 배당은 해당 통화 inflow
+            dividend_currency = _coalesce_currency(event_currency)
             if amount > 0:
-                add_cash(event_currency, "dividend_in", amount, True)
+                add_cash(dividend_currency, "dividend_in", amount, True)
 
         elif event_type == "TAX":
-            # 세금은 기본적으로 같은 통화에서 빠진다고 가정
+            tax_currency = _coalesce_currency(event_currency)
             tax_amount = amount if amount > 0 else tax
             if tax_amount > 0:
-                add_cash(event_currency, "tax_out", tax_amount, False)
+                add_cash(tax_currency, "tax_out", tax_amount, False)
 
         elif event_type == "FX_BUY":
-            # 외화 매수:
-            # KRW 유출 = amount
-            # USD 유입 = quantity
+            target_currency, foreign_amount = _resolve_fx_target(event)
+
             if amount > 0:
                 add_cash("KRW", "fx_buy_out", amount, False)
-            if quantity > 0:
-                add_cash(event_currency, "cash_in", quantity, True)
+            if foreign_amount > 0:
+                add_cash(target_currency, "fx_buy_in", foreign_amount, True)
+            else:
+                anomalies.append({
+                    "reason": "fx_buy_missing_foreign_amount",
+                    "date": event.get("date"),
+                    "raw_trade_name": event.get("raw_trade_name"),
+                    "source_row_number": event.get("source_row_number"),
+                })
 
         elif event_type == "FX_SELL":
-            # 외화 매도:
-            # USD 유출 = quantity
-            # KRW 유입 = amount
-            if quantity > 0:
-                add_cash(event_currency, "fx_sell_in", quantity, False)
+            source_currency, foreign_amount = _resolve_fx_target(event)
+
+            if foreign_amount > 0:
+                add_cash(source_currency, "fx_sell_out", foreign_amount, False)
+            else:
+                anomalies.append({
+                    "reason": "fx_sell_missing_foreign_amount",
+                    "date": event.get("date"),
+                    "raw_trade_name": event.get("raw_trade_name"),
+                    "source_row_number": event.get("source_row_number"),
+                })
+
             if amount > 0:
-                add_cash("KRW", "cash_in", amount, True)
+                add_cash("KRW", "fx_sell_in", amount, True)
 
         elif event_type == "FX_PNL_ADJUST":
-            # 환전 정산차금은 보통 KRW 조정으로 본다
             if amount > 0:
                 add_cash("KRW", "fx_pnl_adjust", amount, True)
             elif amount < 0:
                 add_cash("KRW", "fx_pnl_adjust", abs(amount), False)
-
-        # TRANSFER_IN_KIND 는 현금이 아니라 종목 이동이라 제외
 
     cash_list = []
     for bucket in cash_by_currency.values():
@@ -262,6 +424,8 @@ def build_portfolio_cash() -> dict:
             "dividend_in": round(bucket["dividend_in"], 6),
             "tax_out": round(bucket["tax_out"], 6),
             "fx_buy_out": round(bucket["fx_buy_out"], 6),
+            "fx_buy_in": round(bucket["fx_buy_in"], 6),
+            "fx_sell_out": round(bucket["fx_sell_out"], 6),
             "fx_sell_in": round(bucket["fx_sell_in"], 6),
             "fx_pnl_adjust": round(bucket["fx_pnl_adjust"], 6),
         })
@@ -271,12 +435,13 @@ def build_portfolio_cash() -> dict:
     return {
         "count": len(cash_list),
         "cash": cash_list,
+        "anomalies": anomalies,
     }
+
 
 def build_portfolio_holdings() -> dict:
     events = list_all_normalized_events()
 
-    # 정렬 명시
     events = sorted(
         events,
         key=lambda e: (
@@ -285,6 +450,8 @@ def build_portfolio_holdings() -> dict:
             int(e.get("id") or 0),
         ),
     )
+
+    tax_index = _build_tax_event_index(events)
 
     positions: dict[str, dict] = {}
     realized_pnl_by_currency: dict[str, float] = {}
@@ -304,6 +471,7 @@ def build_portfolio_holdings() -> dict:
         price = float(event.get("price") or 0)
         amount = float(event.get("amount") or 0)
         fee = float(event.get("fee") or 0)
+        event_currency = _normalize_currency(event.get("currency"))
 
         if ticker not in positions:
             positions[ticker] = {
@@ -314,16 +482,28 @@ def build_portfolio_holdings() -> dict:
                 "avg_cost": 0.0,
                 "market": event.get("market"),
                 "asset_type": event.get("asset_type"),
-                "currency": event.get("currency") or "UNKNOWN",
+                "currency": event_currency,
                 "realized_pnl": 0.0,
                 "last_event_date": event.get("date"),
             }
 
         pos = positions[ticker]
 
+        if not pos.get("currency") and event_currency:
+            pos["currency"] = event_currency
+
         if event_type in {"BUY", "TRANSFER_IN_KIND"}:
             buy_cost = amount if amount > 0 else (quantity * price)
             buy_cost += fee
+
+            if event_type == "TRANSFER_IN_KIND" and buy_cost <= 0:
+                anomalies.append({
+                    "ticker": ticker,
+                    "date": event.get("date"),
+                    "reason": "transfer_in_kind_missing_cost_basis",
+                    "event_quantity": quantity,
+                    "source_row_number": event.get("source_row_number"),
+                })
 
             pos["cost_basis"] += buy_cost
             pos["quantity"] += quantity
@@ -334,8 +514,7 @@ def build_portfolio_holdings() -> dict:
             )
 
         elif event_type == "SELL":
-            # 통화는 기존 포지션의 통화를 우선
-            currency = pos.get("currency") or event.get("currency") or "UNKNOWN"
+            currency = _coalesce_currency(pos.get("currency"), event_currency)
 
             if pos["quantity"] <= 0:
                 anomalies.append({
@@ -358,8 +537,10 @@ def build_portfolio_holdings() -> dict:
                 continue
 
             avg_cost_before_sell = pos["cost_basis"] / pos["quantity"]
+            embedded_tax = _embedded_sell_tax(event, tax_index)
             sell_proceeds = amount if amount > 0 else (quantity * price)
             sell_proceeds -= fee
+            sell_proceeds -= embedded_tax
 
             realized = sell_proceeds - (avg_cost_before_sell * quantity)
 
@@ -367,13 +548,11 @@ def build_portfolio_holdings() -> dict:
             pos["quantity"] -= quantity
             pos["cost_basis"] -= avg_cost_before_sell * quantity
 
-            # 미세 반올림 오차 보정
             if abs(pos["quantity"]) <= 1e-12:
                 pos["quantity"] = 0.0
             if abs(pos["cost_basis"]) <= 1e-9:
                 pos["cost_basis"] = 0.0
 
-            # 롱 온리 기준: 음수 원가는 비정상
             if pos["cost_basis"] < 0:
                 anomalies.append({
                     "ticker": ticker,
@@ -408,7 +587,7 @@ def build_portfolio_holdings() -> dict:
             "cost_basis": round(pos["cost_basis"], 6),
             "market": pos["market"],
             "asset_type": pos["asset_type"],
-            "currency": pos["currency"],
+            "currency": pos["currency"] or "UNKNOWN",
             "realized_pnl": round(pos["realized_pnl"], 6),
             "last_event_date": pos["last_event_date"],
         })
@@ -423,6 +602,7 @@ def build_portfolio_holdings() -> dict:
         },
         "anomalies": anomalies,
     }
+
 
 def _enrich_events_with_ticker(parsed_events: list[dict]) -> list[dict]:
     enriched: list[dict] = []
