@@ -13,6 +13,12 @@ def get_connection() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     return conn
 
+def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, column_sql: str) -> None:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    existing = {row["name"] for row in rows}
+    if column_name not in existing:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
+
 
 def init_event_db() -> None:
     with get_connection() as conn:
@@ -33,6 +39,7 @@ def init_event_db() -> None:
                 account TEXT,
                 memo TEXT,
                 raw_trade_name TEXT,
+                trade_no TEXT,
                 source_broker TEXT,
                 source_row_number INTEGER,
                 market TEXT,
@@ -43,6 +50,7 @@ def init_event_db() -> None:
             )
             """
         )
+        _ensure_column(conn, "normalized_events", "trade_no", "TEXT")
 
 
 def insert_normalized_event(event: dict[str, Any], file_hash: str | None = None) -> int:
@@ -51,11 +59,11 @@ def insert_normalized_event(event: dict[str, Any], file_hash: str | None = None)
             """
             INSERT INTO normalized_events (
                 date, event_type, ticker, ticker_name, quantity, price, amount,
-                fee, tax, currency, account, memo, raw_trade_name,
+                fee, tax, currency, account, memo, raw_trade_name, trade_no,
                 source_broker, source_row_number, market, asset_type,
                 mapping_status, file_hash
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event.get("date"),
@@ -71,6 +79,7 @@ def insert_normalized_event(event: dict[str, Any], file_hash: str | None = None)
                 event.get("account"),
                 event.get("memo"),
                 event.get("raw_trade_name"),
+                event.get("trade_no"),
                 event.get("source_broker"),
                 event.get("source_row_number"),
                 event.get("market"),
@@ -96,7 +105,7 @@ def list_normalized_events(limit: int = 1000) -> list[dict[str, Any]]:
             """
             SELECT
                 id, date, event_type, ticker, ticker_name, quantity, price, amount,
-                fee, tax, currency, account, memo, raw_trade_name,
+                fee, tax, currency, account, memo, raw_trade_name, trade_no,
                 source_broker, source_row_number, market, asset_type,
                 mapping_status, file_hash, created_at
             FROM normalized_events
@@ -147,7 +156,7 @@ def list_all_normalized_events() -> list[dict[str, Any]]:
             """
             SELECT
                 id, date, event_type, ticker, ticker_name, quantity, price, amount,
-                fee, tax, currency, account, memo, raw_trade_name,
+                fee, tax, currency, account, memo, raw_trade_name, trade_no,
                 source_broker, source_row_number, market, asset_type,
                 mapping_status, file_hash, created_at
             FROM normalized_events

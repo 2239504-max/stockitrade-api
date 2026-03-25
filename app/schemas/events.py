@@ -37,5 +37,6 @@ class NormalizedEvent(BaseModel):
     account: Optional[str] = None
     memo: Optional[str] = None
     raw_trade_name: Optional[str] = None
+    trade_no: Optional[str] = None
     source_broker: str = "shinhan"
     source_row_number: int

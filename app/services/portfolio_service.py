@@ -44,6 +44,45 @@ KNOWN_CURRENCY_CODES = {
     "NZD",
 }
 
+MARKET_CURRENCY_MAP = {
+    "US": "USD",
+    "KR": "KRW",
+}
+
+
+def _infer_currency_from_ticker_name(value) -> str | None:
+    if value in (None, ""):
+        return None
+
+    text = str(value).strip().upper()
+    for code in KNOWN_CURRENCY_CODES:
+        if text == code or text.startswith(f"{code} "):
+            return code
+    return None
+
+
+def _infer_event_currency(event: dict) -> str:
+    market = str(event.get("market") or "").strip().upper()
+    market_currency = MARKET_CURRENCY_MAP.get(market)
+
+    return _coalesce_currency(
+        event.get("currency"),
+        _infer_currency_from_ticker_name(event.get("ticker_name")),
+        market_currency,
+    )
+
+
+def _trade_no_sort_key(value) -> tuple[int, int, str]:
+    if value in (None, ""):
+        return (1, 0, "")
+
+    text = str(value).strip()
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if digits:
+        return (0, int(digits), text)
+
+    return (0, 0, text)
+
 
 def _save_upload_file(filename: str, file_bytes: bytes) -> Path:
     upload_dir = Path(settings.upload_dir)
@@ -138,33 +177,37 @@ def _embedded_sell_tax(event: dict, tax_index: dict[tuple[str, str, float], list
 
 def _resolve_plain_cash_event(event: dict) -> tuple[str, float, dict | None]:
     event_currency = _normalize_currency(event.get("currency"))
-    ticker_name = _normalize_currency(event.get("ticker_name"))
+    ticker_name_currency = _infer_currency_from_ticker_name(event.get("ticker_name"))
     amount = float(event.get("amount") or 0)
     quantity = float(event.get("quantity") or 0)
     price = float(event.get("price") or 0)
 
-    inferred_currency = event_currency
+    inferred_currency = _coalesce_currency(event_currency, ticker_name_currency)
     inferred_amount = amount
     anomaly = None
 
-    if ticker_name in KNOWN_CURRENCY_CODES:
-        inferred_currency = ticker_name
+    if ticker_name_currency:
+        inferred_currency = ticker_name_currency
 
         if quantity > 0:
             inferred_amount = quantity
-        elif event_currency and event_currency != ticker_name and amount > 0 and price > 0:
+        elif event_currency and event_currency != ticker_name_currency and amount > 0 and price > 0:
             inferred_amount = amount / price
         else:
             inferred_amount = amount
 
-    if inferred_currency is None:
+    if inferred_currency == "UNKNOWN":
+        # 일반 이체입금/대체입금은 대부분 KRW이므로 조용히 KRW 처리
         inferred_currency = "KRW"
-        anomaly = {
-            "reason": "cash_event_missing_currency_defaulted_to_krw",
-            "date": event.get("date"),
-            "raw_trade_name": event.get("raw_trade_name"),
-            "source_row_number": event.get("source_row_number"),
-        }
+
+        raw_trade_name = str(event.get("raw_trade_name") or "")
+        if "외화" in raw_trade_name:
+            anomaly = {
+                "reason": "cash_event_missing_currency_with_foreign_hint",
+                "date": event.get("date"),
+                "raw_trade_name": event.get("raw_trade_name"),
+                "source_row_number": event.get("source_row_number"),
+            }
 
     return inferred_currency, inferred_amount, anomaly
 
@@ -317,7 +360,7 @@ def build_portfolio_cash() -> dict:
 
     for event in events:
         event_type = event.get("event_type")
-        event_currency = _normalize_currency(event.get("currency"))
+        event_currency = _infer_event_currency(event)
 
         amount = float(event.get("amount") or 0)
         fee = float(event.get("fee") or 0)
@@ -338,7 +381,7 @@ def build_portfolio_cash() -> dict:
                 add_cash(currency, "cash_out", cash_amount, False)
 
         elif event_type == "BUY":
-            trade_currency = _coalesce_currency(event_currency)
+            trade_currency = _infer_event_currency(event)
             cash_delta = amount + fee
             if cash_delta > 0:
                 add_cash(trade_currency, "buy_out", cash_delta, False)
@@ -351,7 +394,7 @@ def build_portfolio_cash() -> dict:
                 })
 
         elif event_type == "SELL":
-            trade_currency = _coalesce_currency(event_currency)
+            trade_currency = _infer_event_currency(event)
             embedded_tax = _embedded_sell_tax(event, tax_index)
             cash_delta = amount - fee - embedded_tax
             if cash_delta > 0:
@@ -365,12 +408,12 @@ def build_portfolio_cash() -> dict:
                 })
 
         elif event_type == "DIVIDEND":
-            dividend_currency = _coalesce_currency(event_currency)
+            dividend_currency = _infer_event_currency(event)
             if amount > 0:
                 add_cash(dividend_currency, "dividend_in", amount, True)
 
         elif event_type == "TAX":
-            tax_currency = _coalesce_currency(event_currency)
+            tax_currency = _infer_event_currency(event)
             tax_amount = amount if amount > 0 else tax
             if tax_amount > 0:
                 add_cash(tax_currency, "tax_out", tax_amount, False)
@@ -446,6 +489,7 @@ def build_portfolio_holdings() -> dict:
         events,
         key=lambda e: (
             e.get("date") or "",
+            *_trade_no_sort_key(e.get("trade_no")),
             int(e.get("source_row_number") or 0),
             int(e.get("id") or 0),
         ),
@@ -471,8 +515,8 @@ def build_portfolio_holdings() -> dict:
         price = float(event.get("price") or 0)
         amount = float(event.get("amount") or 0)
         fee = float(event.get("fee") or 0)
-        event_currency = _normalize_currency(event.get("currency"))
-
+        event_currency = _infer_event_currency(event)
+        
         if ticker not in positions:
             positions[ticker] = {
                 "ticker": ticker,
@@ -625,8 +669,15 @@ def _enrich_events_with_ticker(parsed_events: list[dict]) -> list[dict]:
                 copied["market"] = mapping.get("market")
                 copied["asset_type"] = mapping.get("asset_type")
                 copied["mapping_status"] = mapping.get("mapping_status")
+
+                if not copied.get("currency") and mapping.get("currency"):
+                    copied["currency"] = mapping.get("currency")
             else:
                 copied["mapping_status"] = "unmapped"
+
+                inferred_currency = _infer_currency_from_ticker_name(raw_name)
+                if not copied.get("currency") and inferred_currency:
+                    copied["currency"] = inferred_currency
         else:
             copied["mapping_status"] = "not_applicable"
 

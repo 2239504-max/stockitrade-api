@@ -2,6 +2,10 @@ from typing import Any
 
 from app.schemas.events import NormalizedEvent
 
+KNOWN_CURRENCY_CODES = {
+    "KRW", "USD", "JPY", "EUR", "HKD", "CNY", "CNH", "GBP", "AUD", "CAD", "SGD", "CHF", "NZD"
+}
+
 
 def classify_trade_name(raw_trade_name: str) -> str:
     name = raw_trade_name.strip()
@@ -60,14 +64,17 @@ def map_shinhan_row_to_event(row_number: int, row: dict[str, Any]) -> Normalized
     price = _to_float_or_none(row.get("price"))
     fee = _to_float_or_zero(row.get("fee"))
     tax = _to_float_or_zero(row.get("tax"))
-    currency = _none_if_blank(row.get("currency"))
+    currency = _normalize_currency_code(row.get("currency"))
     account = _none_if_blank(row.get("account"))
     memo = _none_if_blank(row.get("memo"))
+    trade_no = _normalize_trade_no(row.get("trade_no"))
+
+    if currency is None:
+        currency = _infer_currency_from_ticker_name(ticker_name)
 
     settlement_amount = _to_float_or_none(row.get("settlement_amount"))
     amount = _to_float_or_none(row.get("amount"))
 
-    # 기본 금액 우선순위
     if settlement_amount not in (None, 0):
         final_amount = settlement_amount
     elif amount not in (None, 0):
@@ -77,7 +84,6 @@ def map_shinhan_row_to_event(row_number: int, row: dict[str, Any]) -> Normalized
     else:
         final_amount = None
 
-    # 이벤트별 보정
     if event_type in {"DIVIDEND", "CASH_IN", "CASH_OUT", "TAX", "FX_PNL_ADJUST"}:
         if final_amount is None and quantity is not None:
             final_amount = quantity
@@ -85,7 +91,6 @@ def map_shinhan_row_to_event(row_number: int, row: dict[str, Any]) -> Normalized
         if price is None:
             price = 0.0
 
-    # 주식/현물성 거래는 amount가 0으로 들어오면 quantity * price로 보정
     if event_type in {"BUY", "SELL", "TRANSFER_IN_KIND"}:
         if (final_amount in (None, 0)) and quantity is not None and price is not None:
             final_amount = quantity * price
@@ -104,6 +109,7 @@ def map_shinhan_row_to_event(row_number: int, row: dict[str, Any]) -> Normalized
         account=account,
         memo=memo,
         raw_trade_name=raw_trade_name or None,
+        trade_no=trade_no,
         source_row_number=row_number,
     )
 
@@ -116,12 +122,10 @@ def _normalize_number(value: Any) -> str | None:
     if not text:
         return None
 
-    # 흔한 표시 제거
     text = text.replace(",", "")
     text = text.replace(" ", "")
-    text = text.replace("\u00a0", "")  # non-breaking space
+    text = text.replace("\u00a0", "")
 
-    # 괄호 음수 처리: (1234.5) -> -1234.5
     if text.startswith("(") and text.endswith(")"):
         text = "-" + text[1:-1]
 
@@ -146,3 +150,30 @@ def _none_if_blank(value: Any):
     if value in (None, ""):
         return None
     return str(value).strip()
+
+
+def _normalize_currency_code(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip().upper()
+    if text in KNOWN_CURRENCY_CODES:
+        return text
+    return None
+
+
+def _infer_currency_from_ticker_name(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+
+    text = str(value).strip().upper()
+    for code in KNOWN_CURRENCY_CODES:
+        if text == code or text.startswith(f"{code} "):
+            return code
+    return None
+
+
+def _normalize_trade_no(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    return text or None
