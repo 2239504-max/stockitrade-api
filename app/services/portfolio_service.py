@@ -1,5 +1,6 @@
 import hashlib
 import uuid
+from collections import defaultdict
 from pathlib import Path
 
 from app.core.config import settings
@@ -50,40 +51,6 @@ MARKET_CURRENCY_MAP = {
 }
 
 
-def _infer_currency_from_ticker_name(value) -> str | None:
-    if value in (None, ""):
-        return None
-
-    text = str(value).strip().upper()
-    for code in KNOWN_CURRENCY_CODES:
-        if text == code or text.startswith(f"{code} "):
-            return code
-    return None
-
-
-def _infer_event_currency(event: dict) -> str:
-    market = str(event.get("market") or "").strip().upper()
-    market_currency = MARKET_CURRENCY_MAP.get(market)
-
-    return _coalesce_currency(
-        event.get("currency"),
-        _infer_currency_from_ticker_name(event.get("ticker_name")),
-        market_currency,
-    )
-
-
-def _trade_no_sort_key(value) -> tuple[int, int, str]:
-    if value in (None, ""):
-        return (1, 0, "")
-
-    text = str(value).strip()
-    digits = "".join(ch for ch in text if ch.isdigit())
-    if digits:
-        return (0, int(digits), text)
-
-    return (0, 0, text)
-
-
 def _save_upload_file(filename: str, file_bytes: bytes) -> Path:
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -116,6 +83,36 @@ def _coalesce_currency(*values) -> str:
     return "UNKNOWN"
 
 
+def _infer_currency_from_ticker_name(value) -> str | None:
+    if value in (None, ""):
+        return None
+
+    text = str(value).strip().upper()
+    for code in KNOWN_CURRENCY_CODES:
+        if text == code or text.startswith(f"{code} "):
+            return code
+    return None
+
+
+def _infer_event_currency(event: dict) -> str:
+    market = str(event.get("market") or "").strip().upper()
+    market_currency = MARKET_CURRENCY_MAP.get(market)
+
+    return _coalesce_currency(
+        event.get("currency"),
+        _infer_currency_from_ticker_name(event.get("ticker_name")),
+        market_currency,
+    )
+
+
+def _event_sort_key(e: dict) -> tuple:
+    return (
+        e.get("date") or "",
+        int(e.get("source_row_number") or 0),
+        int(e.get("id") or 0),
+    )
+
+
 def _build_tax_event_index(events: list[dict]) -> dict[tuple[str, str, float], list[int]]:
     tax_index: dict[tuple[str, str, float], list[int]] = {}
 
@@ -123,7 +120,7 @@ def _build_tax_event_index(events: list[dict]) -> dict[tuple[str, str, float], l
         if event.get("event_type") != "TAX":
             continue
 
-        currency = _coalesce_currency(event.get("currency"))
+        currency = _infer_event_currency(event)
         tax_amount = float(event.get("amount") or event.get("tax") or 0)
         if tax_amount <= 0:
             continue
@@ -152,7 +149,7 @@ def _has_nearby_standalone_tax(
 
     key = (
         str(event.get("date") or ""),
-        _coalesce_currency(event.get("currency")),
+        _infer_event_currency(event),
         round(tax_amount, 6),
     )
     row_number = int(event.get("source_row_number") or 0)
@@ -197,7 +194,6 @@ def _resolve_plain_cash_event(event: dict) -> tuple[str, float, dict | None]:
             inferred_amount = amount
 
     if inferred_currency == "UNKNOWN":
-        # 일반 이체입금/대체입금은 대부분 KRW이므로 조용히 KRW 처리
         inferred_currency = "KRW"
 
         raw_trade_name = str(event.get("raw_trade_name") or "")
@@ -213,7 +209,10 @@ def _resolve_plain_cash_event(event: dict) -> tuple[str, float, dict | None]:
 
 
 def _resolve_fx_target(event: dict) -> tuple[str, float]:
-    target_currency = _coalesce_currency(event.get("currency"), event.get("ticker_name"))
+    target_currency = _coalesce_currency(
+        event.get("currency"),
+        _infer_currency_from_ticker_name(event.get("ticker_name")),
+    )
     amount = float(event.get("amount") or 0)
     quantity = float(event.get("quantity") or 0)
     price = float(event.get("price") or 0)
@@ -225,6 +224,72 @@ def _resolve_fx_target(event: dict) -> tuple[str, float]:
         return target_currency, amount / price
 
     return target_currency, 0.0
+
+
+def _build_same_day_buy_pool(events: list[dict]) -> dict[tuple[str, str], list[dict]]:
+    pool: dict[tuple[str, str], list[dict]] = defaultdict(list)
+
+    for e in sorted(events, key=_event_sort_key):
+        if e.get("event_type") not in {"BUY", "TRANSFER_IN_KIND"}:
+            continue
+
+        ticker = e.get("ticker")
+        date = e.get("date")
+        if not ticker or not date:
+            continue
+
+        qty = float(e.get("quantity") or 0)
+        price = float(e.get("price") or 0)
+        amount = float(e.get("amount") or 0)
+        fee = float(e.get("fee") or 0)
+
+        if qty <= 0:
+            continue
+
+        total_cost = amount if amount > 0 else (qty * price)
+        total_cost += fee
+        unit_cost = total_cost / qty if qty > 0 else 0.0
+
+        pool[(date, ticker)].append({
+            "event_id": int(e.get("id") or 0),
+            "source_row_number": int(e.get("source_row_number") or 0),
+            "remaining_qty": qty,
+            "unit_cost": unit_cost,
+        })
+
+    return pool
+
+
+def _consume_same_day_buy_cover(
+    buy_pool: list[dict],
+    current_row_number: int,
+    needed_qty: float,
+) -> tuple[float, float, list[dict]]:
+    covered_qty = 0.0
+    covered_cost = 0.0
+    consumed: list[dict] = []
+
+    for item in buy_pool:
+        if item["source_row_number"] <= current_row_number:
+            continue
+        if item["remaining_qty"] <= 0:
+            continue
+        if needed_qty <= 1e-12:
+            break
+
+        take = min(item["remaining_qty"], needed_qty)
+        item["remaining_qty"] -= take
+        needed_qty -= take
+
+        covered_qty += take
+        covered_cost += take * item["unit_cost"]
+        consumed.append({
+            "event_id": item["event_id"],
+            "qty": take,
+            "unit_cost": item["unit_cost"],
+        })
+
+    return covered_qty, covered_cost, consumed
 
 
 def ingest_shinhan_file(filename: str, file_bytes: bytes) -> dict:
@@ -381,7 +446,7 @@ def build_portfolio_cash() -> dict:
                 add_cash(currency, "cash_out", cash_amount, False)
 
         elif event_type == "BUY":
-            trade_currency = _infer_event_currency(event)
+            trade_currency = event_currency
             cash_delta = amount + fee
             if cash_delta > 0:
                 add_cash(trade_currency, "buy_out", cash_delta, False)
@@ -394,7 +459,7 @@ def build_portfolio_cash() -> dict:
                 })
 
         elif event_type == "SELL":
-            trade_currency = _infer_event_currency(event)
+            trade_currency = event_currency
             embedded_tax = _embedded_sell_tax(event, tax_index)
             cash_delta = amount - fee - embedded_tax
             if cash_delta > 0:
@@ -408,12 +473,12 @@ def build_portfolio_cash() -> dict:
                 })
 
         elif event_type == "DIVIDEND":
-            dividend_currency = _infer_event_currency(event)
+            dividend_currency = event_currency
             if amount > 0:
                 add_cash(dividend_currency, "dividend_in", amount, True)
 
         elif event_type == "TAX":
-            tax_currency = _infer_event_currency(event)
+            tax_currency = event_currency
             tax_amount = amount if amount > 0 else tax
             if tax_amount > 0:
                 add_cash(tax_currency, "tax_out", tax_amount, False)
@@ -484,22 +549,15 @@ def build_portfolio_cash() -> dict:
 
 def build_portfolio_holdings() -> dict:
     events = list_all_normalized_events()
-
-    events = sorted(
-        events,
-        key=lambda e: (
-            e.get("date") or "",
-            *_trade_no_sort_key(e.get("trade_no")),
-            int(e.get("source_row_number") or 0),
-            int(e.get("id") or 0),
-        ),
-    )
+    events = sorted(events, key=_event_sort_key)
 
     tax_index = _build_tax_event_index(events)
+    same_day_buy_pool = _build_same_day_buy_pool(events)
 
     positions: dict[str, dict] = {}
     realized_pnl_by_currency: dict[str, float] = {}
     anomalies: list[dict] = []
+    preconsumed_buy_qty_by_event_id: dict[int, float] = defaultdict(float)
 
     for event in events:
         event_type = event.get("event_type")
@@ -516,7 +574,7 @@ def build_portfolio_holdings() -> dict:
         amount = float(event.get("amount") or 0)
         fee = float(event.get("fee") or 0)
         event_currency = _infer_event_currency(event)
-        
+
         if ticker not in positions:
             positions[ticker] = {
                 "ticker": ticker,
@@ -526,31 +584,42 @@ def build_portfolio_holdings() -> dict:
                 "avg_cost": 0.0,
                 "market": event.get("market"),
                 "asset_type": event.get("asset_type"),
-                "currency": event_currency,
+                "currency": None if event_currency == "UNKNOWN" else event_currency,
                 "realized_pnl": 0.0,
                 "last_event_date": event.get("date"),
             }
 
         pos = positions[ticker]
 
-        if not pos.get("currency") and event_currency:
+        if not pos.get("currency") and event_currency != "UNKNOWN":
             pos["currency"] = event_currency
 
         if event_type in {"BUY", "TRANSFER_IN_KIND"}:
+            event_id = int(event.get("id") or 0)
+            already_used = preconsumed_buy_qty_by_event_id.get(event_id, 0.0)
+            effective_qty = max(quantity - already_used, 0.0)
+
+            if effective_qty <= 1e-12:
+                pos["last_event_date"] = event.get("date")
+                continue
+
             buy_cost = amount if amount > 0 else (quantity * price)
             buy_cost += fee
+
+            if quantity > 0 and effective_qty < quantity:
+                buy_cost *= (effective_qty / quantity)
 
             if event_type == "TRANSFER_IN_KIND" and buy_cost <= 0:
                 anomalies.append({
                     "ticker": ticker,
                     "date": event.get("date"),
                     "reason": "transfer_in_kind_missing_cost_basis",
-                    "event_quantity": quantity,
+                    "event_quantity": effective_qty,
                     "source_row_number": event.get("source_row_number"),
                 })
 
             pos["cost_basis"] += buy_cost
-            pos["quantity"] += quantity
+            pos["quantity"] += effective_qty
             pos["avg_cost"] = (
                 pos["cost_basis"] / pos["quantity"]
                 if pos["quantity"] > 0
@@ -559,6 +628,33 @@ def build_portfolio_holdings() -> dict:
 
         elif event_type == "SELL":
             currency = _coalesce_currency(pos.get("currency"), event_currency)
+
+            current_row_number = int(event.get("source_row_number") or 0)
+            shortage = max(quantity - pos["quantity"], 0.0)
+            group_key = (event.get("date"), ticker)
+
+            if shortage > 1e-12:
+                covered_qty, covered_cost, consumed = _consume_same_day_buy_cover(
+                    same_day_buy_pool.get(group_key, []),
+                    current_row_number,
+                    shortage,
+                )
+
+                if covered_qty > 0:
+                    pos["quantity"] += covered_qty
+                    pos["cost_basis"] += covered_cost
+
+                    for item in consumed:
+                        preconsumed_buy_qty_by_event_id[item["event_id"]] += item["qty"]
+
+                    anomalies.append({
+                        "ticker": ticker,
+                        "date": event.get("date"),
+                        "reason": "sell_before_buy_same_day_compensated",
+                        "event_quantity": quantity,
+                        "covered_qty": round(covered_qty, 6),
+                        "source_row_number": event.get("source_row_number"),
+                    })
 
             if pos["quantity"] <= 0:
                 anomalies.append({
