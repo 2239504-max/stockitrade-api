@@ -13,6 +13,7 @@ def get_connection() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     return conn
 
+
 def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, column_sql: str) -> None:
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     existing = {row["name"] for row in rows}
@@ -138,6 +139,12 @@ def delete_events_by_file_hash(file_hash: str) -> int:
         return int(cursor.rowcount)
 
 
+def delete_all_events() -> int:
+    with get_connection() as conn:
+        cursor = conn.execute("DELETE FROM normalized_events")
+        return int(cursor.rowcount)
+
+
 def count_events_by_file_hash(file_hash: str) -> int:
     with get_connection() as conn:
         row = conn.execute(
@@ -149,6 +156,7 @@ def count_events_by_file_hash(file_hash: str) -> int:
             (file_hash,),
         ).fetchone()
     return int(row["cnt"])
+
 
 def list_all_normalized_events() -> list[dict[str, Any]]:
     with get_connection() as conn:
