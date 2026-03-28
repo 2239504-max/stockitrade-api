@@ -22,6 +22,7 @@ from app.services.event_store import (
     init_event_db,
     insert_normalized_events,
     count_events_by_file_hash,
+    delete_events_by_file_hash,
     list_all_normalized_events,
 )
 
@@ -292,14 +293,21 @@ def _consume_same_day_buy_cover(
     return covered_qty, covered_cost, consumed
 
 
-def ingest_shinhan_file(filename: str, file_bytes: bytes) -> dict:
+def ingest_shinhan_file(filename: str, file_bytes: bytes, force_replace: bool = False) -> dict:
     if not filename.endswith(".xlsx"):
         raise ValueError("Only .xlsx files are allowed")
 
     file_hash = _hash_bytes(file_bytes)
     existing_count = count_events_by_file_hash(file_hash)
+
+    deleted_existing_count = 0
     if existing_count > 0:
-        raise ValueError(f"This file was already uploaded before: {existing_count} events")
+        if not force_replace:
+            raise ValueError(
+                f"This file was already uploaded before: {existing_count} events. "
+                f"Re-upload with force_replace=true to rebuild normalized events."
+            )
+        deleted_existing_count = delete_events_by_file_hash(file_hash)
 
     saved_path = _save_upload_file(filename, file_bytes)
     parsed_events, errors, unknown_trade_names = parse_shinhan_xlsx(saved_path)
@@ -324,6 +332,8 @@ def ingest_shinhan_file(filename: str, file_bytes: bytes) -> dict:
         "filename": filename,
         "saved_path": str(saved_path),
         "file_hash": file_hash,
+        "force_replace": force_replace,
+        "deleted_existing_count": deleted_existing_count,
         "parsed_count": len(enriched_events),
         "inserted_count": inserted_count,
         "mapped_count": mapped_count,
