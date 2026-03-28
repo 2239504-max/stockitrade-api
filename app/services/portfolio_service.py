@@ -396,6 +396,7 @@ def build_portfolio_summary() -> dict:
             k: round(v, 6) for k, v in holding_cost_basis_by_currency.items()
         },
         "anomalies": holdings_result.get("anomalies", []) + cash_result.get("anomalies", []),
+        "adjustments_applied": holdings_result.get("adjustments_applied", []) + cash_result.get("adjustments_applied", []),
     }
 
 
@@ -405,6 +406,7 @@ def build_portfolio_cash() -> dict:
 
     cash_by_currency: dict[str, dict] = {}
     anomalies: list[dict] = []
+    adjustments_applied: list[dict] = []
 
     def ensure_bucket(currency: str) -> dict:
         if currency not in cash_by_currency:
@@ -554,6 +556,7 @@ def build_portfolio_cash() -> dict:
         "count": len(cash_list),
         "cash": cash_list,
         "anomalies": anomalies,
+        "adjustments_applied": adjustments_applied,
     }
 
 
@@ -567,6 +570,7 @@ def build_portfolio_holdings() -> dict:
     positions: dict[str, dict] = {}
     realized_pnl_by_currency: dict[str, float] = {}
     anomalies: list[dict] = []
+    adjustments_applied: list[dict] = []
     preconsumed_buy_qty_by_event_id: dict[int, float] = defaultdict(float)
 
     for event in events:
@@ -657,7 +661,7 @@ def build_portfolio_holdings() -> dict:
                     for item in consumed:
                         preconsumed_buy_qty_by_event_id[item["event_id"]] += item["qty"]
 
-                    anomalies.append({
+                    adjustments_applied.append({
                         "ticker": ticker,
                         "date": event.get("date"),
                         "reason": "sell_before_buy_same_day_compensated",
@@ -751,6 +755,7 @@ def build_portfolio_holdings() -> dict:
             k: round(v, 6) for k, v in realized_pnl_by_currency.items()
         },
         "anomalies": anomalies,
+        "adjustments_applied": adjustments_applied,
     }
 
 
