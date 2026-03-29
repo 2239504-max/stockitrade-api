@@ -92,3 +92,41 @@ export type EventListResponse = {
   applied_filters: Record<string, string | null>;
   events: EventRecord[];
 };
+
+export type UploadPreviewEvent = {
+  event_type: string;
+  date: string;
+  ticker?: string | null;
+  ticker_name?: string | null;
+  quantity?: number | null;
+  price?: number | null;
+  amount?: number | null;
+  fee: number;
+  tax: number;
+  currency?: string | null;
+  raw_trade_name?: string | null;
+  trade_no?: string | null;
+  source_row_number?: number | null;
+  market?: string | null;
+  asset_type?: string | null;
+  mapping_status?: string | null;
+};
+
+export type UploadShinhanResponse = {
+  message: string;
+  filename: string;
+  saved_path: string;
+  file_hash: string;
+  force_replace: boolean;
+  deleted_existing_count: number;
+  parsed_count: number;
+  inserted_count: number;
+  mapped_count: number;
+  unmapped_name_count: number;
+  error_count: number;
+  errors: Array<Record<string, unknown>>;
+  unknown_trade_names: Record<string, number>;
+  unmapped_name_priorities: Array<Record<string, unknown>>;
+  parsed_preview_head: UploadPreviewEvent[];
+  parsed_preview_tail: UploadPreviewEvent[];
+};
