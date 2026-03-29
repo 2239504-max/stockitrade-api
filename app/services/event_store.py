@@ -100,30 +100,124 @@ def insert_normalized_events(events: list[dict[str, Any]], file_hash: str | None
     return inserted
 
 
-def list_normalized_events(limit: int = 1000) -> list[dict[str, Any]]:
+def _build_event_filters(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    ticker: str | None = None,
+    event_type: str | None = None,
+    currency: str | None = None,
+    raw_trade_name: str | None = None,
+    file_hash: str | None = None,
+) -> tuple[list[str], list[Any]]:
+    where_clauses: list[str] = []
+    params: list[Any] = []
+
+    if date_from:
+        where_clauses.append("date >= ?")
+        params.append(date_from)
+
+    if date_to:
+        where_clauses.append("date <= ?")
+        params.append(date_to)
+
+    if ticker:
+        where_clauses.append("ticker = ?")
+        params.append(ticker)
+
+    if event_type:
+        where_clauses.append("event_type = ?")
+        params.append(event_type)
+
+    if currency:
+        where_clauses.append("currency = ?")
+        params.append(currency)
+
+    if raw_trade_name:
+        where_clauses.append("raw_trade_name LIKE ?")
+        params.append(f"%{raw_trade_name}%")
+
+    if file_hash:
+        where_clauses.append("file_hash = ?")
+        params.append(file_hash)
+
+    return where_clauses, params
+
+
+def list_normalized_events(
+    limit: int = 1000,
+    offset: int = 0,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    ticker: str | None = None,
+    event_type: str | None = None,
+    currency: str | None = None,
+    raw_trade_name: str | None = None,
+    file_hash: str | None = None,
+) -> list[dict[str, Any]]:
+    where_clauses, params = _build_event_filters(
+        date_from=date_from,
+        date_to=date_to,
+        ticker=ticker,
+        event_type=event_type,
+        currency=currency,
+        raw_trade_name=raw_trade_name,
+        file_hash=file_hash,
+    )
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    sql = f"""
+        SELECT
+            id, date, event_type, ticker, ticker_name, quantity, price, amount,
+            fee, tax, currency, account, memo, raw_trade_name, trade_no,
+            source_broker, source_row_number, market, asset_type,
+            mapping_status, file_hash, created_at
+        FROM normalized_events
+        {where_sql}
+        ORDER BY date, id
+        LIMIT ? OFFSET ?
+    """
+
     with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                id, date, event_type, ticker, ticker_name, quantity, price, amount,
-                fee, tax, currency, account, memo, raw_trade_name, trade_no,
-                source_broker, source_row_number, market, asset_type,
-                mapping_status, file_hash, created_at
-            FROM normalized_events
-            ORDER BY date, id
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        rows = conn.execute(sql, (*params, limit, offset)).fetchall()
 
     return [dict(row) for row in rows]
 
 
-def count_normalized_events() -> int:
+def count_normalized_events(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    ticker: str | None = None,
+    event_type: str | None = None,
+    currency: str | None = None,
+    raw_trade_name: str | None = None,
+    file_hash: str | None = None,
+) -> int:
+    where_clauses, params = _build_event_filters(
+        date_from=date_from,
+        date_to=date_to,
+        ticker=ticker,
+        event_type=event_type,
+        currency=currency,
+        raw_trade_name=raw_trade_name,
+        file_hash=file_hash,
+    )
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    sql = f"""
+        SELECT COUNT(*) AS cnt
+        FROM normalized_events
+        {where_sql}
+    """
+
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM normalized_events"
-        ).fetchone()
+        row = conn.execute(sql, params).fetchone()
+
     return int(row["cnt"])
 
 
@@ -173,4 +267,3 @@ def list_all_normalized_events() -> list[dict[str, Any]]:
         ).fetchall()
 
     return [dict(row) for row in rows]
-
