@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchEvents, fetchPortfolioSummary } from "./api";
+import { fetchEvents, fetchPortfolioSummary, uploadShinhanFile } from "./api";
 import type {
   EventListResponse,
   PortfolioCashBucket,
   PortfolioPosition,
   PortfolioSummaryResponse,
+  UploadShinhanResponse,
 } from "./types";
 
 type EventFilters = {
@@ -187,6 +188,123 @@ function AdjustmentsTable({
   );
 }
 
+function UploadSection({
+  onUploadDone,
+}: {
+  onUploadDone: () => Promise<void>;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [forceReplace, setForceReplace] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [result, setResult] = useState<UploadShinhanResponse | null>(null);
+
+  async function handleUpload(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!file) {
+      setUploadError("업로드할 파일을 먼저 선택해야 한다.");
+      return;
+    }
+
+    setUploading(true);
+    setUploadError("");
+    setResult(null);
+
+    try {
+      const res = await uploadShinhanFile({
+        file,
+        forceReplace,
+      });
+      setResult(res);
+      await onUploadDone();
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="section">
+      <h2>Upload Shinhan Ledger</h2>
+
+      <form className="upload-form" onSubmit={handleUpload}>
+        <input
+          type="file"
+          accept=".xlsx"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
+
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={forceReplace}
+            onChange={(e) => setForceReplace(e.target.checked)}
+          />
+          <span>force_replace</span>
+        </label>
+
+        <button type="submit" disabled={uploading || !file}>
+          {uploading ? "Uploading..." : "Upload"}
+        </button>
+      </form>
+
+      {uploadError && <div className="error-box">{uploadError}</div>}
+
+      {result && (
+        <div className="upload-result">
+          <div className="result-grid">
+            <div className="mini-card">
+              <div className="mini-label">filename</div>
+              <div className="mini-value">{result.filename}</div>
+            </div>
+            <div className="mini-card">
+              <div className="mini-label">parsed_count</div>
+              <div className="mini-value">{result.parsed_count}</div>
+            </div>
+            <div className="mini-card">
+              <div className="mini-label">inserted_count</div>
+              <div className="mini-value">{result.inserted_count}</div>
+            </div>
+            <div className="mini-card">
+              <div className="mini-label">mapped_count</div>
+              <div className="mini-value">{result.mapped_count}</div>
+            </div>
+            <div className="mini-card">
+              <div className="mini-label">error_count</div>
+              <div className="mini-value">{result.error_count}</div>
+            </div>
+            <div className="mini-card">
+              <div className="mini-label">deleted_existing_count</div>
+              <div className="mini-value">{result.deleted_existing_count}</div>
+            </div>
+          </div>
+
+          <div className="subtle upload-hash">file_hash: {result.file_hash}</div>
+
+          <details className="details-block">
+            <summary>parsed_preview_head</summary>
+            <pre>{JSON.stringify(result.parsed_preview_head, null, 2)}</pre>
+          </details>
+
+          <details className="details-block">
+            <summary>parsed_preview_tail</summary>
+            <pre>{JSON.stringify(result.parsed_preview_tail, null, 2)}</pre>
+          </details>
+
+          {result.error_count > 0 && (
+            <details className="details-block">
+              <summary>errors</summary>
+              <pre>{JSON.stringify(result.errors, null, 2)}</pre>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EventsSection() {
   const [filters, setFilters] = useState<EventFilters>(initialFilters);
   const [data, setData] = useState<EventListResponse | null>(null);
@@ -217,6 +335,10 @@ function EventsSection() {
     }
   }
 
+  useEffect(() => {
+    onSearch();
+  }, []);
+
   return (
     <div className="section">
       <h2>Events Explorer</h2>
@@ -225,7 +347,12 @@ function EventsSection() {
         <input
           placeholder="Ticker"
           value={filters.ticker}
-          onChange={(e) => setFilters((p) => ({ ...p, ticker: e.target.value }))}
+          onChange={(e) =>
+            setFilters((p) => ({
+              ...p,
+              ticker: e.target.value.toUpperCase(),
+            }))
+          }
         />
         <input
           placeholder="Event Type"
@@ -311,29 +438,22 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    let ignore = false;
+  async function loadSummary() {
+    setLoading(true);
+    setError("");
 
-    async function run() {
-      setLoading(true);
-      setError("");
-
-      try {
-        const data = await fetchPortfolioSummary();
-        if (!ignore) setSummary(data);
-      } catch (err) {
-        if (!ignore) {
-          setError(err instanceof Error ? err.message : "Unknown error");
-        }
-      } finally {
-        if (!ignore) setLoading(false);
-      }
+    try {
+      const data = await fetchPortfolioSummary();
+      setSummary(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
     }
+  }
 
-    run();
-    return () => {
-      ignore = true;
-    };
+  useEffect(() => {
+    void loadSummary();
   }, []);
 
   const title = useMemo(() => "StockiTrade", []);
@@ -343,12 +463,16 @@ export default function App() {
       <header className="app-header">
         <div>
           <h1>{title}</h1>
-          <p className="subtle">Read-only dashboard for portfolio / cash / events</p>
+          <p className="subtle">
+            Read-only dashboard for portfolio / cash / uploads / events
+          </p>
         </div>
       </header>
 
       {loading && <div className="panel">Loading...</div>}
       {error && <div className="error-box">{error}</div>}
+
+      <UploadSection onUploadDone={loadSummary} />
 
       {summary && (
         <>
