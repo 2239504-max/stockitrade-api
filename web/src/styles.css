@@ -210,3 +210,23 @@ th {
   font-size: 13px;
   color: #cbd5e1;
 }
+
+@media (max-width: 640px) {
+  .upload-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .upload-form input[type="file"] {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .upload-form button {
+    width: 100%;
+  }
+
+  .checkbox-row {
+    justify-content: flex-start;
+  }
+}
