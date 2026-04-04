@@ -29,6 +29,8 @@ jobs:
             git checkout main
             git reset --hard origin/main
 
+            rm -f ~/kis-server/web/.env ~/kis-server/web/.env.local ~/kis-server/web/.env.production.local
+
             export PATH="/home/ubuntu/.nvm/versions/node/v20.20.2/bin:$PATH"
 
             echo "PATH=$PATH"
