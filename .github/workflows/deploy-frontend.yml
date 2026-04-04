@@ -1,0 +1,38 @@
+name: Deploy Frontend to Oracle VM
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "web/**"
+      - ".github/workflows/deploy-frontend.yml"
+
+jobs:
+  deploy-frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p ${{ secrets.VM_PORT }} ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy frontend on VM
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.VM_PORT }} ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
+            set -e
+            cd ~/kis-server
+            git fetch origin
+            git checkout main
+            git reset --hard origin/main
+
+            cd ~/kis-server/web
+            npm install
+            npm run build
+
+            sudo rsync -av --delete ~/kis-server/web/dist/ /var/www/stockitrade/
+            sudo systemctl reload nginx
+          EOF
