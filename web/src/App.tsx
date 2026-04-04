@@ -305,7 +305,7 @@ function UploadSection({
   );
 }
 
-function EventsSection() {
+function EventsSection({ refreshKey }: { refreshKey: number }) {
   const [filters, setFilters] = useState<EventFilters>(initialFilters);
   const [data, setData] = useState<EventListResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -335,10 +335,9 @@ function EventsSection() {
     }
   }
 
-  useEffect(() => {
-    onSearch();
-  }, []);
-
+    useEffect(() => {
+    void onSearch();
+  }, [refreshKey]);
   return (
     <div className="section">
       <h2>Events Explorer</h2>
@@ -434,13 +433,19 @@ function EventsSection() {
 }
 
 export default function App() {
+  const [eventsRefreshKey, setEventsRefreshKey] = useState(0);
   const [summary, setSummary] = useState<PortfolioSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  async function handleUploadDone() {
+  await loadSummary();
+  setEventsRefreshKey((v) => v + 1);
+}
+  
   async function loadSummary() {
     setLoading(true);
-    setError("");
+    setError(""); 
 
     try {
       const data = await fetchPortfolioSummary();
@@ -472,7 +477,7 @@ export default function App() {
       {loading && <div className="panel">Loading...</div>}
       {error && <div className="error-box">{error}</div>}
 
-      <UploadSection onUploadDone={loadSummary} />
+      <UploadSection onUploadDone={handleUploadDone} />
 
       {summary && (
         <>
@@ -483,7 +488,7 @@ export default function App() {
         </>
       )}
 
-      <EventsSection />
+      <EventsSection refreshKey={eventsRefreshKey} />
     </div>
   );
 }
