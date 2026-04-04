@@ -20,7 +20,7 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p ${{ secrets.VM_PORT }} ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Deploy frontend on VM      
+      - name: Deploy frontend on VM
         run: |
           ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.VM_PORT }} ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
             set -e
@@ -28,6 +28,8 @@ jobs:
             git fetch origin
             git checkout main
             git reset --hard origin/main
+
+            export PATH="/home/ubuntu/.nvm/versions/node/v20.20.2/bin:$PATH"
 
             echo "PATH=$PATH"
             which node
