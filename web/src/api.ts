@@ -5,7 +5,7 @@ import type {
 } from "./types";
 
 const API_BASE =
-  import.meta.env.VITE_API_BASE_URL || "http://api.stockitrade.com";
+  import.meta.env.VITE_API_BASE_URL || "https://api.stockitrade.com";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
