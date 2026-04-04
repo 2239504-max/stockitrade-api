@@ -16,16 +16,21 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
-input {
+input,
+select {
   background: #111827;
   color: #e5e7eb;
   border: 1px solid #2a3441;
   border-radius: 8px;
   padding: 10px 12px;
+}
+.filters select {
+  width: 100%;
 }
 
 button {

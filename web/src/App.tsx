@@ -26,6 +26,20 @@ const initialFilters: EventFilters = {
   raw_trade_name: "",
 };
 
+const EVENT_TYPE_OPTIONS = [
+  "",
+  "BUY",
+  "SELL",
+  "DIVIDEND",
+  "TAX",
+  "CASH_IN",
+  "CASH_OUT",
+  "FX_BUY",
+  "FX_SELL",
+  "FX_PNL_ADJUST",
+  "TRANSFER_IN_KIND",
+];
+
 function fmt(n: number | null | undefined) {
   if (n === null || n === undefined) return "-";
   return new Intl.NumberFormat("ko-KR", {
@@ -353,11 +367,19 @@ function EventsSection({ refreshKey }: { refreshKey: number }) {
             }))
           }
         />
-        <input
-          placeholder="Event Type"
+        <select
           value={filters.event_type}
-          onChange={(e) => setFilters((p) => ({ ...p, event_type: e.target.value }))}
-        />
+          onChange={(e) =>
+            setFilters((p) => ({ ...p, event_type: e.target.value }))
+          }
+        >
+          <option value="">Event Type</option>
+          {EVENT_TYPE_OPTIONS.filter((v) => v !== "").map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
         <input
           placeholder="Currency"
           value={filters.currency}
