@@ -217,6 +217,16 @@ th {
 }
 
 @media (max-width: 640px) {
+  .filters {
+    grid-template-columns: 1fr;
+  }
+
+  .filters input,
+  .filters select,
+  .filters button {
+    width: 100%;
+    min-width: 0;
+  }
   .upload-form {
     flex-direction: column;
     align-items: stretch;
