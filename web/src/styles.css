@@ -216,6 +216,38 @@ th {
   color: #cbd5e1;
 }
 
+.event-row {
+  cursor: pointer;
+}
+
+.event-row:hover td {
+  background: #0f172a;
+}
+
+.event-row.is-open td {
+  background: #0f172a;
+}
+
+.event-detail-row td {
+  padding: 0;
+  border-bottom: 1px solid #253041;
+}
+
+.event-detail-card {
+  background: #0b1220;
+  padding: 14px 16px;
+}
+
+.event-detail-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.event-detail-grid .mini-value {
+  font-size: 14px;
+}
+
 @media (max-width: 640px) {
   .filters {
     grid-template-columns: 1fr;
