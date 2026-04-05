@@ -40,6 +40,8 @@ const EVENT_TYPE_OPTIONS = [
   "TRANSFER_IN_KIND",
 ];
 
+const CURRENCY_OPTIONS = ["", "KRW", "USD"];
+
 function fmt(n: number | null | undefined) {
   if (n === null || n === undefined) return "-";
   return new Intl.NumberFormat("ko-KR", {
@@ -380,11 +382,19 @@ function EventsSection({ refreshKey }: { refreshKey: number }) {
             </option>
           ))}
         </select>
-        <input
-          placeholder="Currency"
+        <select
           value={filters.currency}
-          onChange={(e) => setFilters((p) => ({ ...p, currency: e.target.value }))}
-        />
+          onChange={(e) =>
+            setFilters((p) => ({ ...p, currency: e.target.value }))
+          }
+        >
+          <option value="">Currency</option>
+          {CURRENCY_OPTIONS.filter((v) => v !== "").map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
         <input
           type="date"
           value={filters.date_from}
