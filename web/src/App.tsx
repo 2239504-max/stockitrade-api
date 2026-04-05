@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { fetchEvents, fetchPortfolioSummary, uploadShinhanFile } from "./api";
 import type {
   EventListResponse,
@@ -326,6 +326,7 @@ function EventsSection({ refreshKey }: { refreshKey: number }) {
   const [data, setData] = useState<EventListResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [openEventId, setOpenEventId] = useState<number | null>(null);
 
   async function onSearch(e?: React.FormEvent) {
     e?.preventDefault();
@@ -349,6 +350,10 @@ function EventsSection({ refreshKey }: { refreshKey: number }) {
     } finally {
       setLoading(false);
     }
+  }
+
+    function toggleEventRow(id: number) {
+    setOpenEventId((prev) => (prev === id ? null : id));
   }
 
     useEffect(() => {
@@ -442,18 +447,66 @@ function EventsSection({ refreshKey }: { refreshKey: number }) {
               </thead>
               <tbody>
                 {data.events.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.date}</td>
-                    <td>{row.event_type}</td>
-                    <td>{row.ticker || "-"}</td>
-                    <td>{row.ticker_name || "-"}</td>
-                    <td>{fmt(row.quantity)}</td>
-                    <td>{fmt(row.price)}</td>
-                    <td>{fmt(row.amount)}</td>
-                    <td>{row.currency || "-"}</td>
-                    <td>{row.trade_no || "-"}</td>
-                    <td>{row.raw_trade_name || "-"}</td>
-                  </tr>
+                  <Fragment key={row.id}>
+                    <tr
+                      className={`event-row ${openEventId === row.id ? "is-open" : ""}`}
+                      onClick={() => toggleEventRow(row.id)}
+                    >
+                      <td>{row.date}</td>
+                      <td>{row.event_type}</td>
+                      <td>{row.ticker || "-"}</td>
+                      <td>{row.ticker_name || "-"}</td>
+                      <td>{fmt(row.quantity)}</td>
+                      <td>{fmt(row.price)}</td>
+                      <td>{fmt(row.amount)}</td>
+                      <td>{row.currency || "-"}</td>
+                      <td>{row.trade_no || "-"}</td>
+                      <td>{row.raw_trade_name || "-"}</td>
+                    </tr>
+              
+                    {openEventId === row.id && (
+                      <tr className="event-detail-row">
+                        <td colSpan={10}>
+                          <div className="event-detail-card">
+                            <div className="event-detail-grid">
+                              <div>
+                                <div className="mini-label">memo</div>
+                                <div className="mini-value">{row.memo || "-"}</div>
+                              </div>
+                              <div>
+                                <div className="mini-label">account</div>
+                                <div className="mini-value">{row.account || "-"}</div>
+                              </div>
+                              <div>
+                                <div className="mini-label">source_row_number</div>
+                                <div className="mini-value">{row.source_row_number ?? "-"}</div>
+                              </div>
+                              <div>
+                                <div className="mini-label">mapping_status</div>
+                                <div className="mini-value">{row.mapping_status || "-"}</div>
+                              </div>
+                              <div>
+                                <div className="mini-label">file_hash</div>
+                                <div className="mini-value">{row.file_hash || "-"}</div>
+                              </div>
+                              <div>
+                                <div className="mini-label">market</div>
+                                <div className="mini-value">{row.market || "-"}</div>
+                              </div>
+                              <div>
+                                <div className="mini-label">asset_type</div>
+                                <div className="mini-value">{row.asset_type || "-"}</div>
+                              </div>
+                              <div>
+                                <div className="mini-label">created_at</div>
+                                <div className="mini-value">{row.created_at || "-"}</div>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
